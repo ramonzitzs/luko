@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User settings and profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "incomes": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "value": { "type": "number" }
+            }
+          },
+          "description": "List of income sources" 
+        },
+        "monthlyLimit": { "type": "number", "description": "User's spending limit for the month" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial transaction record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "cardId": { "type": "string", "description": "Optional card ID if paid with credit card" },
+        "isRecurring": { "type": "boolean", "description": "Whether this is a monthly recurring payment" },
+        "installmentsCount": { "type": "integer", "description": "Total number of installments" },
+        "installmentIndex": { "type": "integer", "description": "Current installment number (1-based)" },
+        "parentTransactionId": { "type": "string", "description": "ID of the original transaction for installments" },
+        "dueDay": { "type": "integer", "description": "Day of the month for the payment (1-31)" }
+      },
+      "required": ["uid", "title", "amount", "type", "category", "date"]
+    },
+    "Card": {
+      "title": "Credit Card",
+      "description": "User's credit card information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "limit": { "type": "number" },
+        "color": { "type": "string" },
+        "currentSpend": { "type": "number" }
+      },
+      "required": ["uid", "name", "limit", "color"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profile and settings"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Individual transactions"
+    },
+    "/cards/{cardId}": {
+      "schema": "Card",
+      "description": "User credit cards"
+    }
+  }
+}

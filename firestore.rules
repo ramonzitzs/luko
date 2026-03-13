@@ -1,0 +1,135 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {uid}
+// Fields:
+//   - uid: string (required)
+//   - email: string (required)
+//   - displayName: string (optional)
+//   - photoURL: string (optional)
+//   - monthlyIncome: number (optional)
+//   - monthlyLimit: number (optional)
+//
+// Collection: transactions
+// Document ID: auto-generated
+// Fields:
+//   - uid: string (required, immutable)
+//   - title: string (required, max 100 chars)
+//   - amount: number (required, positive)
+//   - type: string (required, enum: ['income', 'expense'])
+//   - category: string (required)
+//   - date: timestamp (required, immutable)
+//   - cardId: string (optional)
+//
+// Collection: cards
+// Document ID: auto-generated
+// Fields:
+//   - uid: string (required, immutable)
+//   - name: string (required, max 50 chars)
+//   - limit: number (required, positive)
+//   - color: string (required)
+//   - currentSpend: number (required)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "teenfotos@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (!('monthlyIncome' in data) || data.monthlyIncome is number) &&
+             (!('monthlyLimit' in data) || data.monthlyLimit is number);
+    }
+
+    function isValidTransaction(data) {
+      return hasRequiredFields(['uid', 'title', 'amount', 'type', 'category', 'date']) &&
+             data.uid == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+             data.amount is number && data.amount > 0 &&
+             data.type in ['income', 'expense'] &&
+             data.category is string &&
+             data.date is timestamp;
+    }
+
+    function isValidCard(data) {
+      return hasRequiredFields(['uid', 'name', 'limit', 'color', 'currentSpend']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
+             data.limit is number && data.limit > 0 &&
+             data.color is string &&
+             data.currentSpend is number;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data);
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && 
+                      isValidTransaction(request.resource.data) &&
+                      request.resource.data.uid == resource.data.uid &&
+                      request.resource.data.date == resource.data.date;
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
+    }
+
+    match /cards/{cardId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidCard(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && 
+                      isValidCard(request.resource.data) &&
+                      request.resource.data.uid == resource.data.uid;
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
