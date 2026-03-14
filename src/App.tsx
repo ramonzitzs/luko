@@ -3,8 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as React from 'react';
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Component, ReactNode, ErrorInfo } from 'react';
 import { 
   Plus, 
   LayoutDashboard, 
@@ -221,15 +220,64 @@ const CARD_COLORS = [
 ];
 
 // --- Error Handling ---
+class ErrorBoundary extends Component<any, any> {
+  state: any;
+  props: any;
+
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center text-white">
+          <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
+            <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
+              <AlertCircle size={32} />
+            </div>
+            <h2 className="text-xl font-bold mb-2">Ops! Ocorreu um erro crítico</h2>
+            <p className="text-slate-400 text-sm mb-6">{this.state.error?.message || "Erro desconhecido"}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl"
+            >
+              Recarregar Aplicativo
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
-      setError(event.error);
+      setError(event.error || new Error(event.message));
+    };
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      setError(event.reason instanceof Error ? event.reason : new Error(String(event.reason)));
     };
     window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
   }, []);
 
   if (error) {
@@ -244,7 +292,7 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     }
 
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center text-white">
         <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
           <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
             <AlertCircle size={32} />
@@ -252,7 +300,10 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
           <p className="text-slate-400 text-sm mb-6">{errorMessage}</p>
           <button 
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              setError(null);
+              window.location.reload();
+            }}
             className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl"
           >
             Recarregar Aplicativo
@@ -366,7 +417,9 @@ const AIGoalsSummary = ({ stats, transactions }: { stats: any, transactions: any
       
       setLoading(true);
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+        // Safe access to process.env
+        const apiKey = (typeof process !== 'undefined' && process.env) ? process.env.GEMINI_API_KEY : '';
+        const ai = new GoogleGenAI({ apiKey: apiKey || '' });
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: `Analise meus dados financeiros e dê um resumo curto e motivador sobre minha meta do mês.
@@ -1012,35 +1065,41 @@ export default function App() {
     }
   }, [notifications.length]);
 
-  if (!isAuthReady) return null;
-
-  if (!user) {
+  if (!isAuthReady) {
     return (
-      <div className="min-h-screen bg-[#0F111A] flex flex-col items-center justify-center p-6 text-center text-white">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="max-w-sm w-full"
-        >
-          <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center mx-auto mb-8 shadow-xl shadow-primary/20">
-            <Wallet className="text-on-primary" size={40} />
-          </div>
-          <h1 className="text-3xl font-bold mb-4 tracking-tight">luko.</h1>
-          <p className="text-slate-400 mb-12">Controle suas finanças de forma minimalista e sem atrito.</p>
-          <button 
-            onClick={handleLogin}
-            className="w-full bg-[#1C1F2B] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 shadow-sm border border-slate-800 hover:bg-[#252936] transition-colors"
-          >
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-            Entrar com Google
-          </button>
-        </motion.div>
+      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  return (
-    <GlobalErrorUI>
+  const renderContent = () => {
+    if (!user) {
+      return (
+        <div className="min-h-screen bg-[#0F111A] flex flex-col items-center justify-center p-6 text-center text-white">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="max-w-sm w-full"
+          >
+            <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center mx-auto mb-8 shadow-xl shadow-primary/20">
+              <Wallet className="text-on-primary" size={40} />
+            </div>
+            <h1 className="text-3xl font-bold mb-4 tracking-tight">luko.</h1>
+            <p className="text-slate-400 mb-12">Controle suas finanças de forma minimalista e sem atrito.</p>
+            <button 
+              onClick={handleLogin}
+              className="w-full bg-[#1C1F2B] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 shadow-sm border border-slate-800 hover:bg-[#252936] transition-colors"
+            >
+              <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+              Entrar com Google
+            </button>
+          </motion.div>
+        </div>
+      );
+    }
+
+    return (
       <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
         <header className="p-6 pt-10 max-w-md mx-auto">
@@ -2021,7 +2080,15 @@ export default function App() {
           )}
         </AnimatePresence>
       </div>
-    </GlobalErrorUI>
+    );
+  };
+
+  return (
+    <ErrorBoundary>
+      <GlobalErrorUI>
+        {renderContent()}
+      </GlobalErrorUI>
+    </ErrorBoundary>
   );
 }
 
