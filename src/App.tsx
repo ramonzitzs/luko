@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
   LayoutDashboard, 
@@ -32,7 +33,15 @@ import {
   Edit2,
   ArrowLeft,
   Calendar,
-  Play
+  Play,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  Smartphone,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, Reorder } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -54,7 +63,8 @@ import {
   deleteDoc,
   orderBy,
   Timestamp,
-  getDoc
+  getDoc,
+  getDocFromServer
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
 
@@ -98,6 +108,9 @@ interface UserSettings {
   incomes: IncomeSource[];
   monthlyLimit: number;
   emailNotifications?: boolean;
+  pushNotifications?: boolean;
+  biometricsEnabled?: boolean;
+  privacyMode?: boolean;
   readNotificationIds?: string[];
 }
 
@@ -176,7 +189,17 @@ const CATEGORIES: Record<string, Category> = {
 const getInteractiveIcon = (title: string, category: string) => {
   const t = title.toLowerCase();
   
-  if (category === 'Assinatura') return <Play size={18} />;
+  if (category === 'Assinatura') {
+    if (t.includes('netflix')) return <Play size={18} className="text-rose-600" />;
+    if (t.includes('spotify')) return <Play size={18} className="text-emerald-500" />;
+    if (t.includes('apple tv')) return <Play size={18} className="text-white" />;
+    if (t.includes('prime video') || t.includes('amazon')) return <Play size={18} className="text-blue-400" />;
+    if (t.includes('youtube')) return <Youtube size={18} className="text-rose-600" />;
+    if (t.includes('disney')) return <Play size={18} className="text-blue-600" />;
+    if (t.includes('paramount')) return <Play size={18} className="text-blue-500" />;
+    if (t.includes('globoplay')) return <Play size={18} className="text-orange-500" />;
+    return <Play size={18} />;
+  }
 
   if (t.includes('luz') || t.includes('energia') || t.includes('elétrica')) return <Zap size={18} />;
   if (t.includes('água') || t.includes('sabesp') || t.includes('torneira')) return <Droplets size={18} />;
@@ -198,6 +221,61 @@ const CARD_COLORS = [
 ];
 
 // --- Error Handling ---
+const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      setError(event.error);
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  if (error) {
+    let errorMessage = "Ocorreu um erro inesperado.";
+    try {
+      if (error.message) {
+        const parsed = JSON.parse(error.message);
+        if (parsed.error) errorMessage = `Erro de Permissão: ${parsed.operationType} em ${parsed.path}`;
+      }
+    } catch (e) {
+      errorMessage = error.message || errorMessage;
+    }
+
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
+        <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
+          <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
+            <AlertCircle size={32} />
+          </div>
+          <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
+          <p className="text-slate-400 text-sm mb-6">{errorMessage}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl"
+          >
+            Recarregar Aplicativo
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+};
+
+async function testFirestoreConnection() {
+  try {
+    // Test connection to Firestore
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Firestore is offline. Please check your configuration and internet connection.");
+    }
+  }
+}
+
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
@@ -223,7 +301,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 
 // --- Components ---
 
-const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string) => Promise<void> | void }> = ({ t, deleteTransaction }) => {
+const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string) => Promise<void> | void, privacyMode?: boolean, onClick?: () => void }> = ({ t, deleteTransaction, privacyMode, onClick }) => {
   const x = useMotionValue(0);
   const opacity = useTransform(x, [-60, -20, 0], [1, 0.5, 0]);
 
@@ -245,68 +323,37 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
             deleteTransaction(t.id);
           }
         }}
+        onClick={onClick}
         whileDrag={{ scale: 1.02 }}
-        className="bg-[#1C1F2B] p-4 rounded-[20px] flex items-center justify-between border border-slate-800/50 relative z-10 cursor-grab active:cursor-grabbing"
+        className="bg-[#1C1F2B] p-4 rounded-[20px] flex items-center justify-between border border-slate-800/50 relative z-10 cursor-grab active:cursor-grabbing group"
       >
-        <div className="flex items-center gap-4">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${CATEGORIES[t.category]?.color || 'bg-slate-800 text-slate-400'}`}>
+        <div className="flex items-center gap-4 min-w-0 flex-1">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${CATEGORIES[t.category]?.color || 'bg-slate-800 text-slate-400'}`}>
             {getInteractiveIcon(t.title, t.category)}
           </div>
-          <div>
-            <p className="font-semibold text-sm">{t.title}</p>
-            <p className="text-slate-500 text-xs">
-              {t.category} 
-              {t.parentTransactionId && ` • ${formatCurrency(t.amount * (t.installmentsCount || 1))}`}
-            </p>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-sm truncate pr-2">{t.title}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-slate-500 text-[10px] uppercase tracking-widest font-bold truncate">{t.category}</span>
+              {t.installmentsCount && t.installmentsCount > 1 && (
+                <span className="text-[10px] font-black text-primary bg-primary/10 px-1.5 py-0.5 rounded-md">
+                  {t.installmentIndex}/{t.installmentsCount}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-        <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
-          {t.type === 'income' ? '+' : '-'} {formatCurrency(t.amount)}
-        </p>
+        <div className="text-right ml-4 flex-shrink-0">
+          <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
+            {t.type === 'income' ? '+' : '-'} {privacyMode ? '••••••' : formatCurrency(t.amount)}
+          </p>
+          <p className="text-[10px] font-bold text-slate-500 mt-0.5">
+            {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) : ''}
+          </p>
+        </div>
       </motion.div>
     </div>
   );
-};
-
-const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
-  const [hasError, setHasError] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-
-  useEffect(() => {
-    const handleError = (event: ErrorEvent) => {
-      setHasError(true);
-      try {
-        const parsed = JSON.parse(event.error.message);
-        setErrorMsg(parsed.error || 'Erro desconhecido');
-      } catch {
-        setErrorMsg(event.error.message);
-      }
-    };
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
-  }, []);
-
-  if (hasError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
-        <div className="bg-white p-8 rounded-[32px] shadow-xl max-w-sm w-full text-center">
-          <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <X size={32} />
-          </div>
-          <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
-          <p className="text-slate-500 text-sm mb-6">{errorMsg}</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl"
-          >
-            Tentar novamente
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
 };
 
 const AIGoalsSummary = ({ stats, transactions }: { stats: any, transactions: any[] }) => {
@@ -372,17 +419,32 @@ export default function App() {
   
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
-  const [settings, setSettings] = useState<UserSettings>({ incomes: [], monthlyLimit: 0, emailNotifications: false, readNotificationIds: [] });
+  const [settings, setSettings] = useState<UserSettings>({ 
+    incomes: [], 
+    monthlyLimit: 0, 
+    emailNotifications: false, 
+    pushNotifications: false,
+    biometricsEnabled: false,
+    privacyMode: false,
+    readNotificationIds: [] 
+  });
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(true);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [openedAccordion, setOpenedAccordion] = useState<string | null>(null);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
+  const [editingIncome, setEditingIncome] = useState<IncomeSource | null>(null);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
 
   const [newTransCategory, setNewTransCategory] = useState('Variados');
   const [newTransCardId, setNewTransCardId] = useState('');
+
+  useEffect(() => {
+    testFirestoreConnection();
+  }, []);
 
   // --- Auth ---
   useEffect(() => {
@@ -448,6 +510,9 @@ export default function App() {
           incomes: data.incomes || [],
           monthlyLimit: data.monthlyLimit || 0,
           emailNotifications: data.emailNotifications || false,
+          pushNotifications: data.pushNotifications || false,
+          biometricsEnabled: data.biometricsEnabled || false,
+          privacyMode: data.privacyMode || false,
           readNotificationIds: data.readNotificationIds || []
         });
       }
@@ -729,91 +794,62 @@ export default function App() {
     // Individual bills (not linked to cards)
     const individualBillsRaw = transactions.filter(t => {
       if (t.type !== 'expense' || t.isPaid || t.cardId) return false;
+      
+      // Only show recurring or installments as "bills" to pay
+      // A "lançamento diário" (daily entry) like "Pastelaria" shouldn't be here
+      const isBill = t.isRecurring || (t.installmentsCount && t.installmentsCount > 1);
+      if (!isBill) return false;
+
       const tDate = new Date(t.date);
       tDate.setHours(0, 0, 0, 0);
-      return tDate.getTime() === today.getTime();
+      
+      // Due today or in the past within the same month/year
+      // If it's from a previous month and still unpaid, it's overdue
+      const isSameMonthYear = tDate.getFullYear() === currentYear && tDate.getMonth() === currentMonth;
+      const isPastMonthYear = tDate.getFullYear() < currentYear || (tDate.getFullYear() === currentYear && tDate.getMonth() < currentMonth);
+
+      return (isSameMonthYear && tDate.getDate() <= todayDay) || isPastMonthYear;
     });
 
     const individualBills: any[] = [];
-    const seenIndividualParents = new Set<string>();
-
     individualBillsRaw.forEach(t => {
-      if (t.parentTransactionId) {
-        if (!seenIndividualParents.has(t.parentTransactionId)) {
-          seenIndividualParents.add(t.parentTransactionId);
-          individualBills.push({
-            ...t,
-            title: t.title.split(' (')[0],
-            amount: t.totalAmount || (t.amount * (t.installmentsCount || parseInt(t.title.match(/\/(\d+)\)/)?.[1] || '1') || 1)),
-            isCardBill: false
-          });
-        }
-      } else {
-        individualBills.push({ ...t, isCardBill: false });
-      }
+      const tDate = new Date(t.date);
+      const isOverdue = tDate.getFullYear() < currentYear || 
+                        (tDate.getFullYear() === currentYear && tDate.getMonth() < currentMonth) ||
+                        (tDate.getFullYear() === currentYear && tDate.getMonth() === currentMonth && tDate.getDate() < todayDay);
+      individualBills.push({ ...t, isCardBill: false, isOverdue });
     });
 
-    // Card bills due today
+    // Card bills due today or overdue
     const cardBills = cards.filter(card => {
-      if (!card.dueDay || card.dueDay !== todayDay) return false;
+      if (!card.dueDay) return false;
       
-      // Check if there are unpaid transactions for this card this month
+      // If dueDay is today or has passed this month
+      const isDueOrPast = card.dueDay <= todayDay;
+      
+      // Check if there are unpaid transactions for this card this month or previous months
       const unpaidTransactions = transactions.filter(t => 
         t.cardId === card.id && 
         t.type === 'expense' && 
         !t.isPaid &&
-        new Date(t.date).getMonth() === currentMonth &&
-        new Date(t.date).getFullYear() === currentYear
+        (new Date(t.date).getFullYear() < currentYear || 
+         (new Date(t.date).getFullYear() === currentYear && new Date(t.date).getMonth() <= currentMonth))
       );
       
-      return unpaidTransactions.length > 0;
+      return isDueOrPast && unpaidTransactions.length > 0;
     }).map(card => {
-      const monthly = transactions.filter(t => {
+      const isOverdue = card.dueDay! < todayDay;
+      const unpaid = transactions.filter(t => {
         const tDate = new Date(t.date);
         return t.cardId === card.id && 
                t.type === 'expense' && 
-               tDate.getMonth() === currentMonth && 
-               tDate.getFullYear() === currentYear;
+               !t.isPaid &&
+               (tDate.getFullYear() < currentYear || 
+                (tDate.getFullYear() === currentYear && tDate.getMonth() <= currentMonth));
       });
 
-      // Consolidate installments and recurring
-      const consolidated: Transaction[] = [];
-      const seenParents = new Set<string>();
-      const seenTitles = new Set<string>();
-
-      monthly.forEach(t => {
-        const baseTitle = t.title.split(' (')[0];
-        const isInstallment = t.title.includes('(') && t.title.includes('/');
-
-        if (t.parentTransactionId) {
-          if (!seenParents.has(t.parentTransactionId)) {
-            seenParents.add(t.parentTransactionId);
-            const match = t.title.match(/\/(\d+)\)/);
-            const count = parseInt(match?.[1] || '1') || 1;
-            consolidated.push({
-              ...t,
-              title: baseTitle,
-              amount: t.totalAmount || (t.amount * (t.installmentsCount || count))
-            });
-          }
-        } else if (isInstallment) {
-          const key = `${baseTitle}-${t.amount}`;
-          if (!seenTitles.has(key)) {
-            seenTitles.add(key);
-            const match = t.title.match(/\/(\d+)\)/);
-            const count = parseInt(match?.[1] || '1') || 1;
-            consolidated.push({
-              ...t,
-              title: baseTitle,
-              amount: t.amount * count
-            });
-          }
-        } else {
-          consolidated.push(t);
-        }
-      });
-
-      const amount = consolidated.reduce((acc, t) => acc + t.amount, 0);
+      // Sum the amounts of unpaid transactions up to current month
+      const amount = unpaid.reduce((acc, t) => acc + t.amount, 0);
 
       return {
         id: `card-bill-${card.id}`,
@@ -822,11 +858,12 @@ export default function App() {
         amount,
         category: 'Cartão',
         isCardBill: true,
-        date: today
+        date: today,
+        isOverdue
       };
     });
 
-    return [...individualBills, ...cardBills];
+    return [...individualBills, ...cardBills].sort((a, b) => (b.isOverdue ? 1 : 0) - (a.isOverdue ? 1 : 0));
   }, [transactions, cards]);
 
   const groupedHistoryTransactions = useMemo(() => {
@@ -1003,28 +1040,30 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary>
+    <GlobalErrorUI>
       <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
         <header className="p-6 pt-10 max-w-md mx-auto">
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-3">
+            <div 
+              className="flex items-center gap-3 cursor-pointer active:scale-95 transition-transform"
+              onClick={() => {
+                setActiveTab('dashboard');
+                setSelectedCardId(null);
+              }}
+            >
               <img src={user.photoURL || ''} className="w-9 h-9 rounded-full border border-slate-800" alt="Profile" />
               <div>
                 <h1 className="text-lg font-bold tracking-tight leading-none">Olá, {user.displayName?.split(' ')[0]}</h1>
-                <button 
-                  onClick={() => setIsMonthPickerOpen(true)}
-                  className="text-[10px] text-slate-500 font-bold tracking-widest flex items-center gap-1 mt-1"
-                >
-                  <span className="capitalize">
-                    {selectedMonth.toLocaleDateString('pt-BR', { month: 'long' })}
-                  </span>
-                  <span> de {selectedMonth.getFullYear()}</span>
-                  <ChevronRight size={10} className="rotate-90" />
-                </button>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <button 
+                onClick={() => updateSettings({ privacyMode: !settings.privacyMode })}
+                className="p-2 text-slate-400 hover:text-white transition-colors flex items-center justify-center"
+              >
+                {settings.privacyMode ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
               <button 
                 onClick={() => setIsMonthPickerOpen(true)}
                 className="p-2 text-slate-400 hover:text-white transition-colors flex items-center justify-center"
@@ -1043,7 +1082,7 @@ export default function App() {
               >
                 <Bell size={20} className={notifications.length > 0 ? "text-white" : "text-slate-400"} />
                 {notifications.length > 0 && (
-                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#0F111A]" />
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#000000]" />
                 )}
               </button>
             </div>
@@ -1100,7 +1139,7 @@ export default function App() {
                                    tDate.getMonth() === selectedMonth.getMonth() && 
                                    tDate.getFullYear() === selectedMonth.getFullYear();
                           }).map(t => (
-                            <TransactionItem key={t.id} t={t} deleteTransaction={deleteTransaction} />
+                            <TransactionItem key={t.id} t={t} deleteTransaction={deleteTransaction} privacyMode={settings.privacyMode} />
                           ))}
                         </AnimatePresence>
                       )}
@@ -1118,8 +1157,8 @@ export default function App() {
                       <div className="flex justify-between items-center mb-1">
                         <p className="text-on-primary/70 text-sm font-medium">Disponível</p>
                       </div>
-                      <h2 className="text-4xl font-bold mb-6">
-                        {formatCurrency(stats.available)}
+                      <h2 className="text-4xl font-black mb-6">
+                        {settings.privacyMode ? '••••••' : formatCurrency(stats.available)}
                       </h2>
                       
                       <div className="space-y-3">
@@ -1176,7 +1215,7 @@ export default function App() {
                                   <p className="text-[10px] opacity-50 mb-1 uppercase tracking-widest font-bold">{card.name}</p>
                                   <div className="flex justify-between items-end gap-2">
                                     <p className="text-2xl font-bold whitespace-nowrap">
-                                      {formatCurrency(transactions
+                                      {settings.privacyMode ? '••••••' : formatCurrency(transactions
                                         .filter(t => {
                                           const tDate = new Date(t.date);
                                           return t.cardId === card.id && 
@@ -1189,7 +1228,7 @@ export default function App() {
                                     <div className="text-right flex-shrink-0">
                                       <p className="text-[10px] font-bold opacity-60 leading-none">Limite</p>
                                       <p className="text-xs font-bold opacity-90 whitespace-nowrap">
-                                        {formatCurrency(card.limit - card.currentSpend)}
+                                        {settings.privacyMode ? '••••••' : formatCurrency(card.limit - card.currentSpend)}
                                       </p>
                                     </div>
                                   </div>
@@ -1225,22 +1264,26 @@ export default function App() {
                               initial={{ opacity: 0, scale: 0.95 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.9, x: -20 }}
-                              className="bg-primary/10 border border-primary/20 rounded-2xl p-4 flex items-center justify-between"
+                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-primary/10 border-primary/20'} border rounded-2xl p-4 flex items-center justify-between`}
                             >
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center text-primary">
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                <div className={`w-10 h-10 flex-shrink-0 ${t.isOverdue ? 'bg-rose-500/20 text-rose-500' : 'bg-primary/20 text-primary'} rounded-xl flex items-center justify-center`}>
                                   {CATEGORIES[t.category]?.icon || <MoreHorizontal size={18} />}
                                 </div>
-                                <div>
-                                  <p className="text-sm font-bold">{t.title}</p>
-                                  <p className="text-[10px] text-primary/60 font-bold uppercase tracking-widest">{t.category}</p>
+                                <div className="min-w-0 flex-1">
+                                  <p className={`text-sm font-bold truncate pr-2 ${t.isOverdue ? 'text-rose-500' : 'text-white'}`}>{t.title}</p>
+                                  <p className={`text-[10px] ${t.isOverdue ? 'text-rose-500/60' : 'text-primary/60'} font-bold uppercase tracking-widest truncate`}>
+                                    {t.category} {t.isOverdue && '• ATRASADO'}
+                                  </p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-4">
-                                <p className="text-sm font-bold text-primary">{formatCurrency(t.amount)}</p>
+                              <div className="flex flex-col items-end gap-2 flex-shrink-0 ml-4">
+                                <p className={`text-sm font-black ${t.isOverdue ? 'text-rose-500' : 'text-primary'}`}>
+                                  {settings.privacyMode ? '••••••' : formatCurrency(t.amount)}
+                                </p>
                                 <button 
                                   onClick={() => markAsPaid(t.id)}
-                                  className="bg-primary text-on-primary text-[10px] font-bold px-4 py-2 rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-transform"
+                                  className={`${t.isOverdue ? 'bg-rose-500 shadow-rose-500/20' : 'bg-primary shadow-primary/20'} text-on-primary text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg active:scale-95 transition-transform`}
                                 >
                                   Pago
                                 </button>
@@ -1257,12 +1300,23 @@ export default function App() {
                       <h3 className="font-bold text-lg">Transações recentes</h3>
                       <button className="text-primary text-sm font-medium" onClick={() => setActiveTab('history')}>Ver tudo</button>
                     </div>
-                    <div className="space-y-3">
-                      <AnimatePresence mode="popLayout">
-                        {filteredTransactions.slice(0, 5).map((t) => (
-                          <TransactionItem key={t.id} t={t} deleteTransaction={deleteTransaction} />
-                        ))}
-                      </AnimatePresence>
+                    <div className="relative">
+                      <div className="space-y-3">
+                        <AnimatePresence mode="popLayout">
+                          {filteredTransactions.slice(0, 7).map((t) => (
+                            <TransactionItem 
+                              key={t.id} 
+                              t={t} 
+                              deleteTransaction={deleteTransaction} 
+                              privacyMode={settings.privacyMode} 
+                              onClick={() => setSelectedTransaction(t)}
+                            />
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                      {filteredTransactions.length > 7 && (
+                        <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-[#0F111A] to-transparent pointer-events-none" />
+                      )}
                     </div>
                   </section>
                 </>
@@ -1300,7 +1354,13 @@ export default function App() {
                       <div className="space-y-3">
                         <AnimatePresence mode="popLayout">
                           {items.map((t) => (
-                            <TransactionItem key={t.id} t={t} deleteTransaction={deleteTransaction} />
+                            <TransactionItem 
+                              key={t.id} 
+                              t={t} 
+                              deleteTransaction={deleteTransaction} 
+                              privacyMode={settings.privacyMode} 
+                              onClick={() => setSelectedTransaction(t)}
+                            />
                           ))}
                         </AnimatePresence>
                       </div>
@@ -1357,179 +1417,207 @@ export default function App() {
           )}
 
           {activeTab === 'more' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              <h2 className="text-xl font-bold mb-4">Configurações</h2>
-
-              <div className="bg-[#1C1F2B] rounded-[24px] overflow-hidden border border-slate-800/50">
-                <div className="p-6 border-b border-slate-800/50">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Notificações</h3>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">Notificações por E-mail</p>
-                      <p className="text-xs text-slate-500">Receba avisos de vencimento 1 dia antes</p>
-                    </div>
-                    <button 
-                      onClick={() => updateSettings({ emailNotifications: !settings.emailNotifications })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.emailNotifications ? 'bg-primary' : 'bg-slate-800'}`}
-                    >
-                      <motion.div 
-                        animate={{ x: settings.emailNotifications ? 26 : 4 }}
-                        className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm"
-                      />
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="p-6 border-b border-slate-800/50">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Meus Cartões</h3>
-                    <button onClick={() => setIsCardModalOpen(true)} className="text-primary text-xs font-bold flex items-center gap-1">
-                      <Plus size={14} /> Adicionar
-                    </button>
-                  </div>
-                  <Reorder.Group axis="y" values={cards} onReorder={updateCardsOrder} className="space-y-3">
-                    {cards.map(card => (
-                      <Reorder.Item key={card.id} value={card}>
-                        <div className="flex items-center justify-between p-3 bg-[#0F111A] rounded-xl border border-slate-800/50 cursor-grab active:cursor-grabbing">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              className="space-y-4 pb-12"
+            >
+              <div className="bg-[#1C1F2B] rounded-[32px] overflow-hidden border border-slate-800/50">
+                <SettingsAccordion 
+                  title="Minhas Rendas" 
+                  icon={<Wallet size={20} />}
+                  isOpen={openedAccordion === 'incomes'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'incomes' ? null : 'incomes')}
+                >
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      {settings.incomes.map((income) => (
+                        <div key={income.id} className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
                           <div className="flex items-center gap-3">
-                            <div className={`w-3 h-3 rounded-full ${card.color}`} />
-                            <span className="text-sm font-medium">{card.name}</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-xs text-slate-500">{formatCurrency(card.limit)}</span>
-                            <div className="flex gap-1">
-                              <button onClick={() => setEditingCard(card)} className="p-1 text-slate-500 hover:text-white"><Edit2 size={14} /></button>
-                              <button onClick={() => deleteCard(card.id)} className="p-1 text-slate-500 hover:text-rose-500"><Trash2 size={14} /></button>
+                            <div className="w-8 h-8 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
+                              <ArrowUpRight size={16} />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">{income.label}</p>
+                              <p className="text-[10px] text-slate-500">{formatCurrency(income.value)}</p>
                             </div>
                           </div>
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => setEditingIncome(income)}
+                              className="p-2 text-slate-500 hover:text-white transition-colors"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button 
+                              onClick={() => removeIncomeSource(income.id)}
+                              className="p-2 text-slate-500 hover:text-rose-500 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
-                      </Reorder.Item>
-                    ))}
-                    {cards.length === 0 && <p className="text-xs text-slate-500 italic">Nenhum cartão cadastrado.</p>}
-                  </Reorder.Group>
-                </div>
-
-                {editingCard && (
-                  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={() => setEditingCard(null)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-                    <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} className="bg-[#1C1F2B] w-full max-w-md rounded-t-[32px] sm:rounded-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50">
-                      <h2 className="text-xl font-bold mb-6">Editar Cartão</h2>
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        const formData = new FormData(e.currentTarget);
-                        updateCard(editingCard.id, {
-                          name: formData.get('name') as string,
-                          limit: parseCurrencyInput(formData.get('limit') as string),
-                          color: formData.get('color') as string,
-                          dueDay: parseInt(formData.get('dueDay') as string) || undefined,
-                        });
-                      }} className="space-y-4">
-                        <input name="name" defaultValue={editingCard.name} required className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" />
-                        <div className="grid grid-cols-2 gap-4">
-                          <MoneyInput name="limit" value={editingCard.limit} className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" />
-                          <select name="dueDay" defaultValue={editingCard.dueDay || ""} className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary">
-                            <option value="">Dia Venc.</option>
-                            {[...Array(31)].map((_, i) => (
-                              <option key={i+1} value={i+1}>{i+1}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          {CARD_COLORS.map(color => (
-                            <label key={color.value} className="relative cursor-pointer">
-                              <input type="radio" name="color" value={color.value} className="peer sr-only" defaultChecked={editingCard.color === color.value} />
-                              <div className={`h-12 rounded-xl ${color.value} border-4 border-transparent peer-checked:border-white shadow-sm`} />
-                            </label>
-                          ))}
-                        </div>
-                        <button type="submit" className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20 mt-4">Salvar Alterações</button>
-                      </form>
-                    </motion.div>
-                  </div>
-                )}
-
-                <div className="p-6 border-b border-slate-800/50">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Minhas Rendas</h3>
-                    <button onClick={addIncomeSource} className="text-primary text-xs font-bold flex items-center gap-1">
-                      <Plus size={14} /> Adicionar
+                      ))}
+                    </div>
+                    
+                    <button 
+                      onClick={addIncomeSource}
+                      className="w-full py-3 border border-dashed border-slate-700 rounded-xl text-slate-500 text-sm font-bold hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Plus size={16} />
+                      Adicionar Renda
                     </button>
                   </div>
-                  
-                  <div className="space-y-4">
-                    {settings.incomes.map((income) => (
-                      <div key={income.id} className="flex gap-3 items-end">
-                        <div className="flex-1">
-                          <label className="text-[10px] text-slate-500 mb-1 block uppercase font-bold">Rótulo</label>
-                          <input 
-                            type="text" 
-                            value={income.label}
-                            onChange={(e) => updateIncomeSource(income.id, e.target.value, income.value)}
-                            className="w-full bg-[#0F111A] rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-primary" 
-                          />
-                        </div>
-                        <div className="w-32">
-                          <label className="text-[10px] text-slate-500 mb-1 block uppercase font-bold">Valor</label>
-                          <MoneyInput 
-                            value={income.value}
-                            onChange={(val) => updateIncomeSource(income.id, income.label, val)}
-                            className="w-full bg-[#0F111A] rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-primary" 
-                          />
-                        </div>
-                        <button onClick={() => removeIncomeSource(income.id)} className="p-3 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors">
-                          <X size={18} />
-                        </button>
-                      </div>
-                    ))}
-                    
-                    {settings.incomes.length === 0 && (
-                      <p className="text-xs text-slate-500 italic">Nenhuma renda cadastrada.</p>
-                    )}
-                  </div>
-                </div>
+                </SettingsAccordion>
 
-                <div className="p-6 border-b border-slate-800/50">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Meta de Gastos</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-bold text-primary">
-                        {formatCurrency(settings.monthlyLimit || stats.totalIncome)}
-                      </span>
-                    </div>
+                <SettingsAccordion 
+                  title="Meus Cartões" 
+                  icon={<CreditCard size={20} />}
+                  isOpen={openedAccordion === 'cards'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'cards' ? null : 'cards')}
+                >
+                  <div className="space-y-4">
+                    <Reorder.Group axis="y" values={cards} onReorder={updateCardsOrder} className="space-y-2">
+                      {cards.map((card) => (
+                        <Reorder.Item 
+                          key={card.id} 
+                          value={card}
+                          className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 cursor-grab active:cursor-grabbing"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white`} style={{ backgroundColor: card.color }}>
+                              <CreditCard size={16} />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">{card.name}</p>
+                              <p className="text-[10px] text-slate-500">Final {card.lastFour} • Vence dia {card.dueDay}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => setEditingCard(card)}
+                              className="p-2 text-slate-500 hover:text-white transition-colors"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button 
+                              onClick={() => deleteCard(card.id)}
+                              className="p-2 text-slate-500 hover:text-rose-500 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </Reorder.Item>
+                      ))}
+                    </Reorder.Group>
                     
-                    <div className="relative h-2 flex items-center">
-                      <div className="absolute inset-0 bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-primary/30 transition-all duration-500"
-                          style={{ width: `${Math.min(100, ((settings.monthlyLimit || stats.totalIncome) / (stats.totalIncome || 1)) * 100)}%` }}
+                    <button 
+                      onClick={() => setIsCardModalOpen(true)}
+                      className="w-full py-3 border border-dashed border-slate-700 rounded-xl text-slate-500 text-sm font-bold hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Plus size={16} />
+                      Novo Cartão
+                    </button>
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion 
+                  title="Meta de Gastos" 
+                  icon={<Target size={20} />}
+                  isOpen={openedAccordion === 'budget'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'budget' ? null : 'budget')}
+                >
+                  <div className="space-y-6">
+                    <div>
+                      <div className="flex justify-between items-center mb-4">
+                        <span className="text-sm font-bold text-slate-400">Limite Mensal</span>
+                        <span className="text-xl font-black text-primary">{formatCurrency(settings.monthlyLimit || stats.totalIncome)}</span>
+                      </div>
+                      <div className="relative h-2 flex items-center">
+                        <div className="absolute inset-0 bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-primary/30 transition-all duration-500"
+                            style={{ width: `${Math.min(100, ((settings.monthlyLimit || stats.totalIncome) / (stats.totalIncome || 1)) * 100)}%` }}
+                          />
+                        </div>
+                        <input 
+                          type="range"
+                          min="0"
+                          max={stats.totalIncome || 10000}
+                          step="50"
+                          value={settings.monthlyLimit || stats.totalIncome}
+                          onChange={(e) => updateSettings({ monthlyLimit: parseInt(e.target.value) })}
+                          className="absolute inset-0 w-full h-2 bg-transparent appearance-none cursor-pointer accent-primary z-10"
                         />
                       </div>
-                      <input 
-                        type="range"
-                        min="0"
-                        max={stats.totalIncome || 10000}
-                        step="50"
-                        value={settings.monthlyLimit || stats.totalIncome}
-                        onChange={(e) => updateSettings({ monthlyLimit: parseInt(e.target.value) })}
-                        className="absolute inset-0 w-full h-2 bg-transparent appearance-none cursor-pointer accent-primary z-10"
-                      />
+                      <p className="text-[10px] text-slate-500 mt-4 leading-relaxed">
+                        Este valor será usado para calcular sua barra de progresso no dashboard e ajudar no controle de gastos.
+                      </p>
                     </div>
-
-                    <p className="text-[10px] text-slate-500">
-                      Ajuste o quanto você pretende gastar em relação ao seu ganho total de {formatCurrency(stats.totalIncome)}.
-                    </p>
                   </div>
-                </div>
+                </SettingsAccordion>
 
-                <div className="p-2">
-                  <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-colors">
-                    <div className="flex items-center gap-3">
-                      <LogOut size={20} />
-                      <span className="font-semibold">Sair da conta</span>
+                <SettingsAccordion 
+                  title="Notificações & Segurança" 
+                  icon={<Bell size={20} />}
+                  isOpen={openedAccordion === 'notifications'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'notifications' ? null : 'notifications')}
+                >
+                  <div className="space-y-4 text-left">
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                          <Smartphone size={20} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">Notificações Push</p>
+                          <p className="text-[10px] text-slate-500">Alertas de vencimento no celular</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => updateSettings({ pushNotifications: !settings.pushNotifications })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.pushNotifications ? 'bg-primary' : 'bg-slate-700'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: settings.pushNotifications ? 26 : 4 }}
+                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.pushNotifications ? 'bg-black' : 'bg-white'}`}
+                        />
+                      </button>
                     </div>
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
+
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                          <Fingerprint size={20} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">Biometria</p>
+                          <p className="text-[10px] text-slate-500">Acessar app com digital/face</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => updateSettings({ biometricsEnabled: !settings.biometricsEnabled })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.biometricsEnabled ? 'bg-primary' : 'bg-slate-700'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: settings.biometricsEnabled ? 26 : 4 }}
+                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.biometricsEnabled ? 'bg-black' : 'bg-white'}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </SettingsAccordion>
+              </div>
+
+              <div className="px-4 pt-4">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full py-4 bg-rose-500/10 text-rose-500 font-bold rounded-2xl flex items-center justify-center gap-2 border border-rose-500/20 active:scale-95 transition-transform"
+                >
+                  <LogOut size={20} />
+                  Sair da conta
+                </button>
+                <p className="text-center text-[10px] text-slate-600 mt-6 font-medium uppercase tracking-widest">luko v2.0 • 2026</p>
               </div>
             </motion.div>
           )}
@@ -1729,18 +1817,32 @@ export default function App() {
               </motion.div>
             </div>
           )}
+        </AnimatePresence>
 
+        {/* Month Picker Modal */}
+        <AnimatePresence>
           {isMonthPickerOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMonthPickerOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div className="fixed inset-0 z-[60] flex items-start justify-center pt-20 px-4">
               <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }} 
-                animate={{ scale: 1, opacity: 1 }} 
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-[#1C1F2B] w-full max-w-xs rounded-[32px] p-6 relative z-10 shadow-2xl border border-slate-800/50"
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                onClick={() => setIsMonthPickerOpen(false)} 
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm" 
+              />
+              <motion.div 
+                initial={{ y: -50, opacity: 0 }} 
+                animate={{ y: 0, opacity: 1 }} 
+                exit={{ y: -50, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-[32px] p-6 relative z-10 shadow-2xl border border-slate-800/50"
               >
-                <h2 className="text-lg font-bold mb-4 text-center">Selecionar Mês</h2>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="font-bold text-lg">Selecionar Mês</h3>
+                  <button onClick={() => setIsMonthPickerOpen(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                    <X size={20} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
                   {Array.from({ length: 12 }).map((_, i) => {
                     const date = new Date(selectedMonth.getFullYear(), i, 1);
                     const isSelected = selectedMonth.getMonth() === i;
@@ -1751,28 +1853,167 @@ export default function App() {
                           setSelectedMonth(date);
                           setIsMonthPickerOpen(false);
                         }}
-                        className={`p-3 rounded-xl text-xs font-bold transition-colors ${
-                          isSelected ? 'bg-primary text-on-primary' : 'bg-[#0F111A] text-slate-400 hover:text-white'
+                        className={`py-4 rounded-2xl text-sm font-bold transition-all ${
+                          isSelected 
+                            ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' 
+                            : 'bg-[#0F111A] text-slate-400 hover:text-white border border-slate-800/50'
                         }`}
                       >
-                        {date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}
+                        {date.toLocaleString('pt-BR', { month: 'short' }).replace('.', '')}
                       </button>
                     );
                   })}
                 </div>
-                <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-800">
+                <div className="mt-6 pt-6 border-t border-slate-800/50 flex justify-between items-center">
                   <button 
                     onClick={() => setSelectedMonth(new Date(selectedMonth.getFullYear() - 1, selectedMonth.getMonth()))}
-                    className="p-2 text-slate-400 hover:text-white"
+                    className="p-2 text-slate-500 hover:text-white"
                   >
-                    {selectedMonth.getFullYear() - 1}
+                    <ChevronLeft size={20} />
                   </button>
-                  <span className="font-bold">{selectedMonth.getFullYear()}</span>
+                  <span className="font-black text-xl">{selectedMonth.getFullYear()}</span>
                   <button 
                     onClick={() => setSelectedMonth(new Date(selectedMonth.getFullYear() + 1, selectedMonth.getMonth()))}
-                    className="p-2 text-slate-400 hover:text-white"
+                    className="p-2 text-slate-500 hover:text-white"
                   >
-                    {selectedMonth.getFullYear() + 1}
+                    <ChevronRight size={20} />
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Transaction Detail Modal */}
+        <AnimatePresence>
+          {selectedTransaction && (
+            <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                onClick={() => setSelectedTransaction(null)} 
+                className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
+              />
+              <motion.div 
+                initial={{ y: 100, opacity: 0 }} 
+                animate={{ y: 0, opacity: 1 }} 
+                exit={{ y: 100, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-t-[40px] sm:rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
+              >
+                <div className="w-12 h-1.5 bg-slate-800 rounded-full mx-auto mb-8 sm:hidden" />
+                
+                <div className="flex flex-col items-center text-center mb-8">
+                  <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-4 ${CATEGORIES[selectedTransaction.category]?.color || 'bg-slate-800 text-slate-400'}`}>
+                    {getInteractiveIcon(selectedTransaction.title, selectedTransaction.category)}
+                  </div>
+                  <h3 className="text-2xl font-black mb-1">{selectedTransaction.title}</h3>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">{selectedTransaction.category}</p>
+                </div>
+
+                <div className="space-y-6 mb-8">
+                  <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
+                    <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Valor</span>
+                    <span className={`text-xl font-black ${selectedTransaction.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
+                      {formatCurrency(selectedTransaction.amount)}
+                    </span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
+                    <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Data</span>
+                    <span className="text-sm font-bold">{selectedTransaction.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+                  </div>
+
+                  {selectedTransaction.installmentsCount && selectedTransaction.installmentsCount > 1 && (
+                    <>
+                      <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
+                        <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Parcela</span>
+                        <span className="text-sm font-bold">{selectedTransaction.installmentIndex} de {selectedTransaction.installmentsCount}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
+                        <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Valor Total</span>
+                        <span className="text-sm font-bold">{formatCurrency(selectedTransaction.totalAmount || (selectedTransaction.amount * selectedTransaction.installmentsCount))}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
+                        <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Restante</span>
+                        <span className="text-sm font-bold text-rose-500">
+                          {formatCurrency((selectedTransaction.totalAmount || (selectedTransaction.amount * selectedTransaction.installmentsCount)) - (selectedTransaction.amount * (selectedTransaction.installmentIndex || 1)))}
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedTransaction.cardId && (
+                    <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
+                      <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Cartão</span>
+                      <span className="text-sm font-bold">{cards.find(c => c.id === selectedTransaction.cardId)?.name || 'Desconhecido'}</span>
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={() => setSelectedTransaction(null)}
+                  className="w-full bg-[#0F111A] text-white font-bold py-4 rounded-2xl border border-slate-800 hover:bg-[#151825] transition-colors"
+                >
+                  Fechar
+                </button>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Edit Income Modal */}
+        <AnimatePresence>
+          {editingIncome && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                onClick={() => setEditingIncome(null)} 
+                className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
+              />
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }} 
+                animate={{ scale: 1, opacity: 1 }} 
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
+              >
+                <h3 className="text-xl font-black mb-6">Editar Renda</h3>
+                <div className="space-y-4 mb-8">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Nome da Renda</label>
+                    <input 
+                      type="text" 
+                      value={editingIncome.label}
+                      onChange={(e) => setEditingIncome({ ...editingIncome, label: e.target.value })}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Valor Mensal</label>
+                    <MoneyInput 
+                      value={editingIncome.value}
+                      onChange={(val) => setEditingIncome({ ...editingIncome, value: val })}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setEditingIncome(null)}
+                    className="flex-1 bg-slate-800 text-white font-bold py-4 rounded-2xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={() => {
+                      updateIncomeSource(editingIncome.id, editingIncome.label, editingIncome.value);
+                      setEditingIncome(null);
+                    }}
+                    className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
+                  >
+                    Salvar
                   </button>
                 </div>
               </motion.div>
@@ -1780,7 +2021,7 @@ export default function App() {
           )}
         </AnimatePresence>
       </div>
-    </ErrorBoundary>
+    </GlobalErrorUI>
   );
 }
 
@@ -1790,5 +2031,36 @@ function NavButton({ active, icon, label, onClick }: { active: boolean, icon: Re
       {icon}
       <span className="text-[10px] font-bold tracking-wider">{label}</span>
     </button>
+  );
+}
+
+function SettingsAccordion({ title, icon, children, isOpen, onToggle }: { title: string, icon: React.ReactNode, children: React.ReactNode, isOpen: boolean, onToggle: () => void }) {
+  return (
+    <div className="border-b border-slate-800/50 overflow-hidden">
+      <button 
+        onClick={onToggle}
+        className="w-full flex items-center justify-between p-6 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="text-primary">{icon}</div>
+          <span className="font-bold text-sm uppercase tracking-widest text-slate-300">{title}</span>
+        </div>
+        {isOpen ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
+      </button>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+          >
+            <div className="p-6 pt-0">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
