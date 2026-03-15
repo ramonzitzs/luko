@@ -8,14 +8,16 @@
   "theme_color": "#cdfc54",
   "icons": [
     {
-      "src": "https://drive.google.com/uc?export=download&id=19gznOcOL8FUV3Oqo10z3cx0hzjci6OR0",
+      "src": "https://drive.google.com/uc?export=download&id=1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "https://drive.google.com/uc?export=download&id=19gznOcOL8FUV3Oqo10z3cx0hzjci6OR0",
+      "src": "https://drive.google.com/uc?export=download&id=1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

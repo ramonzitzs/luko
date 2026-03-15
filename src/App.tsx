@@ -40,7 +40,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronLeft,
-  AlertCircle
+  AlertCircle,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, Reorder } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -490,6 +491,29 @@ export default function App() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
 
   const [newTransCategory, setNewTransCategory] = useState('Variados');
@@ -1362,7 +1386,7 @@ export default function App() {
                     <div className="relative">
                       <div className="space-y-3">
                         <AnimatePresence mode="popLayout">
-                          {filteredTransactions.slice(0, 7).map((t) => (
+                          {filteredTransactions.slice(0, 6).map((t) => (
                             <TransactionItem 
                               key={t.id} 
                               t={t} 
@@ -1373,8 +1397,8 @@ export default function App() {
                           ))}
                         </AnimatePresence>
                       </div>
-                      {filteredTransactions.length > 7 && (
-                        <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-[#0F111A] to-transparent pointer-events-none" />
+                      {filteredTransactions.length > 6 && (
+                        <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
                       )}
                     </div>
                   </section>
@@ -1664,6 +1688,26 @@ export default function App() {
                         />
                       </button>
                     </div>
+
+                    {deferredPrompt && (
+                      <div className="flex items-center justify-between p-4 bg-primary/10 rounded-2xl border border-primary/20">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center text-primary">
+                            <Download size={20} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-primary">Instalar App</p>
+                            <p className="text-[10px] text-primary/60">Tenha o luko na sua tela inicial</p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={handleInstallClick}
+                          className="bg-primary text-on-primary text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg active:scale-95 transition-transform"
+                        >
+                          Instalar
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </SettingsAccordion>
               </div>
