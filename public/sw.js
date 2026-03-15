@@ -1,4 +1,4 @@
-const CACHE_NAME = 'luko-cache-v1';
+const CACHE_NAME = 'Luko-cache-v2';
 const urlsToCache = [
   '/',
   '/index.html',

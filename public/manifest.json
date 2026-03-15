@@ -1,23 +1,30 @@
 {
-  "name": "luko",
-  "short_name": "luko",
+  "name": "Luko",
+  "short_name": "Luko",
   "description": "APP de finanças pessoais minimalista focado em simplicidade e controle de gastos.",
-  "start_url": "/",
+  "id": "/?source=pwa",
+  "start_url": "/?source=pwa",
   "display": "standalone",
   "background_color": "#0F111A",
   "theme_color": "#cdfc54",
   "icons": [
     {
-      "src": "https://drive.google.com/uc?export=download&id=1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
+      "src": "https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "https://drive.google.com/uc?export=download&id=1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
+      "src": "https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

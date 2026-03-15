@@ -1109,7 +1109,7 @@ export default function App() {
             <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center mx-auto mb-8 shadow-xl shadow-primary/20">
               <Wallet className="text-on-primary" size={40} />
             </div>
-            <h1 className="text-3xl font-bold mb-4 tracking-tight">luko.</h1>
+            <h1 className="text-3xl font-bold mb-4 tracking-tight">Luko.</h1>
             <p className="text-slate-400 mb-12">Controle suas finanças de forma minimalista e sem atrito.</p>
             <button 
               onClick={handleLogin}
@@ -1697,7 +1697,7 @@ export default function App() {
                           </div>
                           <div>
                             <p className="text-sm font-bold text-primary">Instalar App</p>
-                            <p className="text-[10px] text-primary/60">Tenha o luko na sua tela inicial</p>
+                            <p className="text-[10px] text-primary/60">Tenha o Luko na sua tela inicial</p>
                           </div>
                         </div>
                         <button 
@@ -1720,7 +1720,7 @@ export default function App() {
                   <LogOut size={20} />
                   Sair da conta
                 </button>
-                <p className="text-center text-[10px] text-slate-600 mt-6 font-medium uppercase tracking-widest">luko v2.0 • 2026</p>
+                <p className="text-center text-[10px] text-slate-600 mt-6 font-medium uppercase tracking-widest">Luko v2.0 • 2026</p>
               </div>
             </motion.div>
           )}
