@@ -6,7 +6,7 @@
   "start_url": "/?source=pwa",
   "display": "standalone",
   "background_color": "#0F111A",
-  "theme_color": "#cdfc54",
+  "theme_color": "#0F111A",
   "icons": [
     {
       "src": "https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I",

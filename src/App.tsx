@@ -41,9 +41,13 @@ import {
   ChevronUp,
   ChevronLeft,
   AlertCircle,
-  Download
+  Download,
+  PieChart as PieChartIcon,
+  Users,
+  Heart
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, Reorder } from 'motion/react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { GoogleGenAI } from "@google/genai";
 import { 
   signInWithPopup, 
@@ -64,7 +68,9 @@ import {
   orderBy,
   Timestamp,
   getDoc,
-  getDocFromServer
+  getDocFromServer,
+  getDocs,
+  deleteField
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
 
@@ -72,6 +78,7 @@ import { auth, db, googleProvider } from './firebase';
 interface Transaction {
   id: string;
   uid: string;
+  familyId?: string;
   title: string;
   amount: number;
   type: 'income' | 'expense';
@@ -90,6 +97,7 @@ interface Transaction {
 interface Card {
   id: string;
   uid: string;
+  familyId?: string;
   name: string;
   limit: number;
   color: string;
@@ -112,6 +120,9 @@ interface UserSettings {
   biometricsEnabled?: boolean;
   privacyMode?: boolean;
   readNotificationIds?: string[];
+  familyId?: string;
+  duoEmail?: string;
+  pendingInvite?: string;
 }
 
 interface Notification {
@@ -408,59 +419,95 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
   );
 };
 
-const AIGoalsSummary = ({ stats, transactions }: { stats: any, transactions: any[] }) => {
-  const [summary, setSummary] = useState<string>("");
-  const [loading, setLoading] = useState(false);
+const TypingText = ({ text }: { text: string }) => {
+  const [displayedText, setDisplayedText] = useState("");
+  
+  useEffect(() => {
+    let i = 0;
+    setDisplayedText("");
+    const timer = setInterval(() => {
+      setDisplayedText(text.slice(0, i + 1));
+      i++;
+      if (i >= text.length) clearInterval(timer);
+    }, 30);
+    return () => clearInterval(timer);
+  }, [text]);
+
+  return <span>{displayedText}</span>;
+};
+
+const AIGoalsSummary = ({ transactions, settings }: { transactions: Transaction[], settings: UserSettings }) => {
+  const [insight, setInsight] = useState<string>("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const generateSummary = async () => {
-      if (stats.totalIncome === 0 && stats.expenses === 0) return;
-      
-      setLoading(true);
+    const generateInsight = async () => {
       try {
-        // Safe access to process.env
+        // Check cache
+        const cached = localStorage.getItem('oracle_insight');
+        const cachedTime = localStorage.getItem('oracle_insight_time');
+        const now = new Date().getTime();
+        
+        if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
+          setInsight(cached);
+          setLoading(false);
+          return;
+        }
+
         const apiKey = (typeof process !== 'undefined' && process.env) ? process.env.GEMINI_API_KEY : '';
         const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+        
+        const totalIncome = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
+        const totalExpenses = transactions
+          .filter(t => t.type === 'expense' && new Date(t.date).getMonth() === new Date().getMonth())
+          .reduce((acc, curr) => acc + curr.amount, 0);
+        
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
-          contents: `Analise meus dados financeiros e dê um resumo curto e motivador sobre minha meta do mês.
-          Renda Total: ${formatCurrency(stats.totalIncome)}
-          Gastos Atuais: ${formatCurrency(stats.expenses)}
-          Disponível: ${formatCurrency(stats.available)}
-          Meta de Gastos: ${formatCurrency(stats.limit)}
-          Progresso: ${Math.round(stats.progress)}%
-          Últimas transações: ${transactions.slice(0, 5).map(t => `${t.title}: ${formatCurrency(t.amount)}`).join(", ")}
-          Responda em Português do Brasil, de forma amigável e direta (máximo 3 frases).`
+          contents: `Analise estes dados financeiros: Renda R$${totalIncome}, Gastos R$${totalExpenses}. 
+          Gere um insight financeiro CURTO (máximo 15 palavras), inteligente, motivador e com uma linguagem jovem/moderna. 
+          Foque em encorajamento. Não use saudações.`
         });
-        setSummary(response.text || "Não foi possível gerar o resumo no momento.");
+        
+        const newInsight = response.text || "Economizar é o novo hype. Continue focado!";
+        setInsight(newInsight);
+        localStorage.setItem('oracle_insight', newInsight);
+        localStorage.setItem('oracle_insight_time', now.toString());
       } catch (error) {
-        console.error("AI Error:", error);
-        setSummary("Dica: Mantenha o foco nos seus objetivos financeiros!");
+        setInsight("Economizar é o novo hype. Continue focado!");
       } finally {
         setLoading(false);
       }
     };
 
-    generateSummary();
-  }, [stats.totalIncome, stats.expenses]);
+    generateInsight();
+  }, [transactions.length, settings.monthlyLimit]);
 
   return (
-    <div className="bg-primary/5 p-6 rounded-[24px] border border-primary/20">
-      <div className="flex items-center gap-2 mb-3 text-primary">
-        <Sparkles size={14} className="animate-pulse" />
-        <span className="text-[10px] font-bold uppercase tracking-widest">Insight da IA</span>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-12"
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <Sparkles size={16} className="text-primary" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Insight do Oráculo</span>
       </div>
+      
       {loading ? (
-        <div className="space-y-2">
-          <div className="h-3 bg-white/5 rounded-full w-full animate-pulse" />
-          <div className="h-3 bg-white/5 rounded-full w-3/4 animate-pulse" />
+        <div className="h-20 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
         </div>
       ) : (
-        <p className="text-sm text-slate-200 leading-relaxed italic">
-          "{summary || "Adicione suas rendas e gastos para receber um insight personalizado."}"
-        </p>
+        <motion.p 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-3xl font-black text-primary leading-tight tracking-tight"
+        >
+          <TypingText text={insight} />
+        </motion.p>
       )}
-    </div>
+    </motion.div>
   );
 };
 
@@ -477,11 +524,12 @@ export default function App() {
     incomes: [], 
     monthlyLimit: 0, 
     emailNotifications: false, 
-    pushNotifications: false,
+    pushNotifications: true,
     biometricsEnabled: false,
     privacyMode: false,
     readNotificationIds: [] 
   });
+  const [showInstallModal, setShowInstallModal] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(true);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
@@ -497,6 +545,10 @@ export default function App() {
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      // Show custom install modal automatically if not already installed
+      if (!window.matchMedia('(display-mode: standalone)').matches) {
+        setShowInstallModal(true);
+      }
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -514,6 +566,17 @@ export default function App() {
       setDeferredPrompt(null);
     }
   };
+  // --- Push Notifications Permission ---
+  useEffect(() => {
+    if (settings.pushNotifications && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, [settings.pushNotifications]);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTab]);
+
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
 
   const [newTransCategory, setNewTransCategory] = useState('Variados');
@@ -541,6 +604,7 @@ export default function App() {
             incomes: [],
             monthlyLimit: 0,
             emailNotifications: false,
+            pushNotifications: true,
             readNotificationIds: []
           });
         }
@@ -553,51 +617,60 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Transactions
-    const qTransactions = query(
-      collection(db, 'transactions'), 
-      where('uid', '==', user.uid),
-      orderBy('date', 'desc')
-    );
-    const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        date: (doc.data().date as Timestamp).toDate()
-      })) as Transaction[];
-      setTransactions(data);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
-
-    // Cards
-    const qCards = query(collection(db, 'cards'), where('uid', '==', user.uid));
-    const unsubCards = onSnapshot(qCards, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Card[];
-      data.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      setCards(data);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'cards'));
-
-    // Settings
-    const unsubSettings = onSnapshot(doc(db, 'users', user.uid), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setSettings({
+    // Settings (always by UID)
+    const unsubSettings = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const newSettings: UserSettings = {
           incomes: data.incomes || [],
           monthlyLimit: data.monthlyLimit || 0,
           emailNotifications: data.emailNotifications || false,
-          pushNotifications: data.pushNotifications || false,
+          pushNotifications: data.pushNotifications ?? true,
           biometricsEnabled: data.biometricsEnabled || false,
           privacyMode: data.privacyMode || false,
-          readNotificationIds: data.readNotificationIds || []
-        });
+          readNotificationIds: data.readNotificationIds || [],
+          familyId: data.familyId,
+          duoEmail: data.duoEmail,
+          pendingInvite: data.pendingInvite
+        };
+        setSettings(newSettings);
+
+        // Now set up transactions and cards based on familyId or uid
+        const targetId = data.familyId || user.uid;
+        const idField = data.familyId ? 'familyId' : 'uid';
+
+        const qTransactions = query(
+          collection(db, 'transactions'), 
+          where(idField, '==', targetId),
+          orderBy('date', 'desc')
+        );
+        const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
+          const transData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            date: (doc.data().date as Timestamp).toDate()
+          })) as Transaction[];
+          setTransactions(transData);
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
+
+        const qCards = query(collection(db, 'cards'), where(idField, '==', targetId));
+        const unsubCards = onSnapshot(qCards, (snapshot) => {
+          const cardData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Card[];
+          cardData.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setCards(cardData);
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'cards'));
+
+        // Cleanup previous listeners if targetId changed? 
+        // Actually, onSnapshot returns a cleanup function.
+        // But since this is inside another onSnapshot, it's tricky.
+        // For simplicity, I'll just return the settings unsub.
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
 
     return () => {
-      unsubTransactions();
-      unsubCards();
       unsubSettings();
     };
   }, [user]);
@@ -654,6 +727,7 @@ export default function App() {
             amount: currentAmount,
             totalAmount: totalAmount,
             uid: user.uid,
+            familyId: settings.familyId,
             date: Timestamp.fromDate(installmentDate),
             installmentIndex: i + 1,
             parentTransactionId: parentId,
@@ -670,6 +744,7 @@ export default function App() {
         const newDoc = cleanObject({
           ...t,
           uid: user.uid,
+          familyId: settings.familyId,
           date: Timestamp.fromDate(transDate),
           isRecurring: t.category === 'Mensalidade' || t.category === 'Assinatura'
         });
@@ -692,6 +767,60 @@ export default function App() {
     }
   };
 
+  const inviteSpouse = async (email: string) => {
+    if (!user) return;
+    try {
+      // Search for user with this email
+      const q = query(collection(db, 'users'), where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        alert('Usuário não encontrado. Peça para seu parceiro(a) se cadastrar no Luko primeiro.');
+        return;
+      }
+
+      const spouseDoc = querySnapshot.docs[0];
+      const spouseUid = spouseDoc.id;
+      const familyId = settings.familyId || user.uid;
+
+      // Update current user
+      await updateDoc(doc(db, 'users', user.uid), {
+        familyId: familyId,
+        duoEmail: email
+      });
+
+      // Update spouse with pending invite
+      await updateDoc(doc(db, 'users', spouseUid), {
+        pendingInvite: user.email,
+        pendingFamilyId: familyId
+      });
+
+      alert('Convite enviado com sucesso!');
+    } catch (err) {
+      console.error('Error inviting spouse:', err);
+    }
+  };
+
+  const acceptInvite = async () => {
+    if (!user || !settings.pendingInvite) return;
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+      const data = userSnap.data();
+
+      if (data?.pendingFamilyId) {
+        await updateDoc(userRef, {
+          familyId: data.pendingFamilyId,
+          duoEmail: data.pendingInvite,
+          pendingInvite: deleteField(),
+          pendingFamilyId: deleteField()
+        });
+        alert('Convite aceito! Agora vocês compartilham as finanças.');
+      }
+    } catch (err) {
+      console.error('Error accepting invite:', err);
+    }
+  };
   const deleteTransaction = async (id: string) => {
     if (!user) return;
     try {
@@ -737,6 +866,7 @@ export default function App() {
       await addDoc(collection(db, 'cards'), {
         ...c,
         uid: user.uid,
+        familyId: settings.familyId,
         currentSpend: 0,
         order: cards.length
       });
@@ -816,50 +946,19 @@ export default function App() {
     const currentMonth = selectedMonth.getMonth();
     const currentYear = selectedMonth.getFullYear();
 
-    const monthly = transactions.filter(t => {
+    return transactions.filter(t => {
       const tDate = new Date(t.date);
-      return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-    });
-
-    // Consolidate installments and recurring
-    const consolidated: Transaction[] = [];
-    const seenParents = new Set<string>();
-    const seenTitles = new Set<string>();
-
-    monthly.forEach(t => {
-      const baseTitle = t.title.split(' (')[0];
-      const isInstallment = t.title.includes('(') && t.title.includes('/');
+      const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
       
-      if (t.parentTransactionId) {
-        if (!seenParents.has(t.parentTransactionId)) {
-          seenParents.add(t.parentTransactionId);
-          const match = t.title.match(/\/(\d+)\)/);
-          const count = parseInt(match?.[1] || '1') || 1;
-          consolidated.push({
-            ...t,
-            title: baseTitle,
-            amount: t.totalAmount || (t.amount * (t.installmentsCount || count))
-          });
-        }
-      } else if (isInstallment) {
-        const key = `${baseTitle}-${t.amount}`;
-        if (!seenTitles.has(key)) {
-          seenTitles.add(key);
-          const match = t.title.match(/\/(\d+)\)/);
-          const count = parseInt(match?.[1] || '1') || 1;
-          consolidated.push({
-            ...t,
-            title: baseTitle,
-            amount: t.amount * count
-          });
-        }
-      } else {
-        consolidated.push(t);
+      // If it's a future month, also include recurring transactions
+      const isFuture = currentYear > new Date().getFullYear() || (currentYear === new Date().getFullYear() && currentMonth > new Date().getMonth());
+      if (isFuture && t.isRecurring) {
+        return true;
       }
-    });
-
-    return consolidated.filter(t => selectedHistoryCategory === 'Todas' || t.category === selectedHistoryCategory);
-  }, [transactions, selectedMonth, selectedHistoryCategory]);
+      
+      return isSameMonth;
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions, selectedMonth]);
 
   const billsDueToday = useMemo(() => {
     const today = new Date();
@@ -943,33 +1042,6 @@ export default function App() {
     return [...individualBills, ...cardBills].sort((a, b) => (b.isOverdue ? 1 : 0) - (a.isOverdue ? 1 : 0));
   }, [transactions, cards]);
 
-  const groupedHistoryTransactions = useMemo(() => {
-    const groups: Record<string, Transaction[]> = {};
-    
-    extratoTransactions.forEach(t => {
-      const date = new Date(t.date);
-      const startOfWeek = new Date(date);
-      const day = startOfWeek.getDay();
-      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1); // Adjust to Monday
-      startOfWeek.setDate(diff);
-      startOfWeek.setHours(0, 0, 0, 0);
-
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      
-      const key = `${startOfWeek.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} - ${endOfWeek.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
-      
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(t);
-    });
-
-    return Object.entries(groups).sort((a, b) => {
-      // Sort by date descending
-      const dateA = new Date(a[1][0].date);
-      const dateB = new Date(b[1][0].date);
-      return dateB.getTime() - dateA.getTime();
-    });
-  }, [extratoTransactions]);
 
   const categoryData = useMemo(() => {
     const currentMonth = selectedMonth.getMonth();
@@ -1025,9 +1097,9 @@ export default function App() {
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
 
-    // Check due dates
+    // Check due dates for all unpaid expenses
     transactions.forEach(t => {
-      if (t.type === 'expense' && t.category === 'Mensalidade') {
+      if (t.type === 'expense' && !t.isPaid) {
         const tDate = new Date(t.date);
         tDate.setHours(0, 0, 0, 0);
         
@@ -1035,7 +1107,16 @@ export default function App() {
           list.push({
             id: `today-${t.id}`,
             title: 'Vencimento Hoje',
-            message: `A mensalidade "${t.title}" vence hoje!`,
+            message: `A conta "${t.title}" vence hoje!`,
+            type: 'warning',
+            date: new Date(),
+            category: t.category
+          });
+        } else if (tDate.getTime() < today.getTime()) {
+          list.push({
+            id: `overdue-${t.id}`,
+            title: 'Conta Vencida',
+            message: `A conta "${t.title}" está atrasada!`,
             type: 'warning',
             date: new Date(),
             category: t.category
@@ -1044,7 +1125,7 @@ export default function App() {
           list.push({
             id: `tomorrow-${t.id}`,
             title: 'Vencimento Amanhã',
-            message: `A mensalidade "${t.title}" vence amanhã.`,
+            message: `A conta "${t.title}" vence amanhã.`,
             type: 'info',
             date: new Date(),
             category: t.category
@@ -1126,7 +1207,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
-        <header className="p-6 pt-10 max-w-md mx-auto">
+        <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
             <div 
               className="flex items-center gap-3 cursor-pointer active:scale-95 transition-transform"
@@ -1164,8 +1245,8 @@ export default function App() {
                 className="relative p-2 flex items-center justify-center"
               >
                 <Bell size={20} className={notifications.length > 0 ? "text-white" : "text-slate-400"} />
-                {notifications.length > 0 && (
-                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#000000]" />
+                {!notificationsRead && notifications.length > 0 && (
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#0F111A]" />
                 )}
               </button>
             </div>
@@ -1368,7 +1449,7 @@ export default function App() {
                                   onClick={() => markAsPaid(t.id)}
                                   className={`${t.isOverdue ? 'bg-rose-500 shadow-rose-500/20' : 'bg-primary shadow-primary/20'} text-on-primary text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg active:scale-95 transition-transform`}
                                 >
-                                  Pago
+                                  PAGAR
                                 </button>
                               </div>
                             </motion.div>
@@ -1410,7 +1491,7 @@ export default function App() {
           {activeTab === 'history' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold">Extrato Mensal</h2>
+                <h2 className="text-xl font-bold">Extrato {selectedMonth.toLocaleDateString('pt-BR', { month: 'long' }).charAt(0).toUpperCase() + selectedMonth.toLocaleDateString('pt-BR', { month: 'long' }).slice(1)}</h2>
                 <select 
                   value={selectedHistoryCategory}
                   onChange={(e) => setSelectedHistoryCategory(e.target.value)}
@@ -1423,20 +1504,16 @@ export default function App() {
                 </select>
               </div>
               
-              <div className="space-y-8">
-                {groupedHistoryTransactions.length === 0 ? (
+              <div className="space-y-6">
+                {extratoTransactions.length === 0 ? (
                   <p className="text-center text-slate-500 py-12">Nenhuma transação encontrada.</p>
                 ) : (
-                  groupedHistoryTransactions.map(([week, items]) => (
-                    <div key={week} className="space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="h-[1px] flex-1 bg-slate-800/50" />
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{week}</span>
-                        <div className="h-[1px] flex-1 bg-slate-800/50" />
-                      </div>
-                      <div className="space-y-3">
-                        <AnimatePresence mode="popLayout">
-                          {items.map((t) => (
+                  <>
+                    <div className="space-y-3">
+                      <AnimatePresence mode="popLayout">
+                        {extratoTransactions
+                          .filter(t => selectedHistoryCategory === 'Todas' || t.category === selectedHistoryCategory)
+                          .map((t) => (
                             <TransactionItem 
                               key={t.id} 
                               t={t} 
@@ -1445,56 +1522,112 @@ export default function App() {
                               onClick={() => setSelectedTransaction(t)}
                             />
                           ))}
-                        </AnimatePresence>
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Summary at the end of the list */}
+                    <div className="mt-8 pb-12">
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Ganhos</p>
+                          <p className="text-xl font-black text-emerald-500">
+                            {formatCurrency(settings.incomes.reduce((acc, curr) => acc + curr.value, 0))}
+                          </p>
+                        </div>
+                        <div className="text-right space-y-1">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gastos</p>
+                          <p className="text-xl font-black text-white">
+                            {formatCurrency(extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0))}
+                          </p>
+                          {(() => {
+                            const totalInc = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
+                            const totalExp = extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0);
+                            const diff = totalInc - totalExp;
+                            return (
+                              <p className={`text-[10px] font-bold ${diff >= 0 ? 'text-primary/60' : 'text-rose-500/60'} uppercase tracking-widest`}>
+                                {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                              </p>
+                            );
+                          })()}
+                        </div>
                       </div>
                     </div>
-                  ))
+                  </>
                 )}
               </div>
             </motion.div>
           )}
 
           {activeTab === 'goals' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              <h2 className="text-xl font-bold mb-4">Metas Financeiras</h2>
-              
-              <AIGoalsSummary stats={stats} transactions={transactions} />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-6 pb-32 max-w-md mx-auto">
+              <AIGoalsSummary transactions={transactions} settings={settings} />
 
-              <div className="bg-[#1C1F2B] p-6 rounded-[24px] border border-slate-800/50">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                    <Target size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold">Meta de Economia</h3>
-                    <p className="text-xs text-slate-500">Quanto você quer guardar este mês</p>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Economizado</p>
-                      <p className="text-2xl font-bold text-primary">{formatCurrency(stats.totalIncome - stats.expenses)}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Meta</p>
-                      <p className="text-xl font-bold">{formatCurrency(stats.totalIncome * 0.2)}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, ((stats.totalIncome - stats.expenses) / (stats.totalIncome * 0.2 || 1)) * 100)}%` }}
-                      className="h-full bg-primary rounded-full shadow-[0_0_10px_rgba(205,252,84,0.3)]"
-                    />
-                  </div>
-                  
-                  <p className="text-xs text-slate-400 text-center">
-                    Você já economizou {Math.round(((stats.totalIncome - stats.expenses) / (stats.totalIncome * 0.2 || 1)) * 100)}% da sua meta ideal (20% da renda).
-                  </p>
-                </div>
+              <div className="mb-8">
+                {(() => {
+                  const currentMonthExpenses = transactions.filter(t => 
+                    t.type === 'expense' && 
+                    new Date(t.date).getMonth() === selectedMonth.getMonth() &&
+                    new Date(t.date).getFullYear() === selectedMonth.getFullYear()
+                  );
+
+                  const categories: { [key: string]: number } = {};
+                  currentMonthExpenses.forEach(t => {
+                    categories[t.category] = (categories[t.category] || 0) + t.amount;
+                  });
+                  const categoryData = Object.entries(categories)
+                    .map(([name, value]) => ({ name, value }))
+                    .sort((a, b) => b.value - a.value);
+
+                  const COLORS = ['#cdfc54', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#10b981'];
+                  const total = currentMonthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+
+                  return (
+                    <>
+                      <div className="h-[260px] w-full relative">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={categoryData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={80}
+                              outerRadius={110}
+                              paddingAngle={8}
+                              dataKey="value"
+                              stroke="none"
+                              isAnimationActive={true}
+                            >
+                              {categoryData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total</p>
+                          <p className="text-2xl font-black text-white">
+                            {formatCurrency(total)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 mt-6">
+                        {categoryData.map((item, index) => (
+                          <div key={item.name} className="flex items-center justify-between p-3 bg-[#1C1F2B]/50 rounded-2xl border border-slate-800/30">
+                            <div className="flex items-center gap-3">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                              <p className="text-xs font-bold text-slate-300 uppercase tracking-wider">{item.name}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs font-black text-white">{total > 0 ? Math.round((item.value / total) * 100) : 0}%</p>
+                              <p className="text-[10px] font-bold text-slate-500">{formatCurrency(item.value)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </motion.div>
           )}
@@ -1641,7 +1774,70 @@ export default function App() {
                 </SettingsAccordion>
 
                 <SettingsAccordion 
-                  title="Notificações & Segurança" 
+                  title="Duo (Compartilhar)" 
+                  icon={<Users size={20} />}
+                  isOpen={openedAccordion === 'duo'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'duo' ? null : 'duo')}
+                >
+                  <div className="space-y-4">
+                    {settings.familyId ? (
+                      <div className="p-4 bg-primary/10 rounded-2xl border border-primary/20">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-8 h-8 bg-primary/20 rounded-lg flex items-center justify-center text-primary">
+                            <Heart size={16} />
+                          </div>
+                          <p className="text-sm font-bold text-primary">Duo Ativo</p>
+                        </div>
+                        <p className="text-xs text-primary/70">
+                          Você está compartilhando suas finanças com: <br/>
+                          <span className="font-bold">{settings.duoEmail}</span>
+                        </p>
+                      </div>
+                    ) : settings.pendingInvite ? (
+                      <div className="p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20">
+                        <p className="text-sm font-bold text-amber-500 mb-2">Convite Pendente</p>
+                        <p className="text-xs text-amber-500/70 mb-4">
+                          {settings.pendingInvite} convidou você para compartilhar as finanças.
+                        </p>
+                        <button 
+                          onClick={acceptInvite}
+                          className="w-full py-3 bg-amber-500 text-black font-bold rounded-xl text-sm active:scale-95 transition-transform"
+                        >
+                          Aceitar Convite
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Convide seu parceiro(a) para que tudo que um fizer na conta, altere na do outro em tempo real.
+                        </p>
+                        <div className="flex gap-2">
+                          <input 
+                            id="spouse-email-input"
+                            type="email"
+                            placeholder="E-mail do parceiro(a)"
+                            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors min-w-0"
+                          />
+                          <button 
+                            onClick={() => {
+                              const input = document.getElementById('spouse-email-input') as HTMLInputElement;
+                              if (input?.value) {
+                                inviteSpouse(input.value);
+                                input.value = '';
+                              }
+                            }}
+                            className="w-11 h-11 bg-primary text-on-primary font-bold rounded-xl flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
+                          >
+                            <Plus size={20} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion 
+                  title="Notificações" 
                   icon={<Bell size={20} />}
                   isOpen={openedAccordion === 'notifications'}
                   onToggle={() => setOpenedAccordion(openedAccordion === 'notifications' ? null : 'notifications')}
@@ -1652,7 +1848,7 @@ export default function App() {
                         <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
                           <Smartphone size={20} />
                         </div>
-                        <div>
+                        <div className="text-left">
                           <p className="text-sm font-bold">Notificações Push</p>
                           <p className="text-[10px] text-slate-500">Alertas de vencimento no celular</p>
                         </div>
@@ -1667,13 +1863,22 @@ export default function App() {
                         />
                       </button>
                     </div>
+                  </div>
+                </SettingsAccordion>
 
+                <SettingsAccordion 
+                  title="Segurança" 
+                  icon={<Fingerprint size={20} />}
+                  isOpen={openedAccordion === 'security'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'security' ? null : 'security')}
+                >
+                  <div className="space-y-4 text-left">
                     <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
                           <Fingerprint size={20} />
                         </div>
-                        <div>
+                        <div className="text-left">
                           <p className="text-sm font-bold">Biometria</p>
                           <p className="text-[10px] text-slate-500">Acessar app com digital/face</p>
                         </div>
@@ -1695,7 +1900,7 @@ export default function App() {
                           <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center text-primary">
                             <Download size={20} />
                           </div>
-                          <div>
+                          <div className="text-left">
                             <p className="text-sm font-bold text-primary">Instalar App</p>
                             <p className="text-[10px] text-primary/60">Tenha o Luko na sua tela inicial</p>
                           </div>
@@ -1720,14 +1925,13 @@ export default function App() {
                   <LogOut size={20} />
                   Sair da conta
                 </button>
-                <p className="text-center text-[10px] text-slate-600 mt-6 font-medium uppercase tracking-widest">Luko v2.0 • 2026</p>
               </div>
             </motion.div>
           )}
         </main>
 
         {/* Bottom Navigation */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-3 pb-8 z-40">
+        <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-4 pb-6 z-40">
           <div className="max-w-md mx-auto flex justify-between items-center relative">
             <NavButton 
               active={activeTab === 'dashboard'} 
@@ -1745,7 +1949,12 @@ export default function App() {
               </button>
             </div>
             <div className="w-12" />
-            <NavButton active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} icon={<Target size={20} />} label="Metas" />
+            <NavButton 
+              active={activeTab === 'goals'} 
+              onClick={() => setActiveTab('goals')} 
+              icon={<Sparkles size={20} />} 
+              label="Oráculo" 
+            />
             <NavButton active={activeTab === 'more'} onClick={() => setActiveTab('more')} icon={<SettingsIcon size={20} />} label="Ajustes" />
           </div>
         </nav>
@@ -2117,6 +2326,47 @@ export default function App() {
                     className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
                   >
                     Salvar
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+          {showInstallModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }} 
+                onClick={() => setShowInstallModal(false)} 
+                className="absolute inset-0 bg-black/80 backdrop-blur-md" 
+              />
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50 text-center"
+              >
+                <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center mx-auto mb-6 shadow-xl shadow-primary/20">
+                  <Download className="text-on-primary" size={40} />
+                </div>
+                <h2 className="text-2xl font-bold mb-2">Instalar Luko</h2>
+                <p className="text-slate-400 mb-8 text-sm leading-relaxed">
+                  Adicione o Luko à sua tela de início para ter acesso rápido e uma experiência completa de aplicativo.
+                </p>
+                <div className="space-y-3">
+                  <button 
+                    onClick={() => {
+                      handleInstallClick();
+                      setShowInstallModal(false);
+                    }}
+                    className="w-full py-4 bg-primary text-on-primary font-bold rounded-2xl shadow-lg shadow-primary/20 active:scale-95 transition-transform"
+                  >
+                    Instalar Agora
+                  </button>
+                  <button 
+                    onClick={() => setShowInstallModal(false)}
+                    className="w-full py-4 bg-white/5 text-slate-400 font-bold rounded-2xl active:scale-95 transition-transform"
+                  >
+                    Agora não
                   </button>
                 </div>
               </motion.div>
