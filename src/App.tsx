@@ -1559,10 +1559,10 @@ export default function App() {
           )}
 
           {activeTab === 'goals' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-6 pb-32 max-w-md mx-auto">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-6 pb-24 max-w-md mx-auto">
               <AIGoalsSummary transactions={transactions} settings={settings} />
 
-              <div className="mb-8">
+              <div className="mb-6">
                 {(() => {
                   const currentMonthExpenses = transactions.filter(t => 
                     t.type === 'expense' && 
