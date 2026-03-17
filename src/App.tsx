@@ -44,7 +44,10 @@ import {
   Download,
   PieChart as PieChartIcon,
   Users,
-  Heart
+  Heart,
+  Mail,
+  Share2,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, Reorder } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
@@ -92,6 +95,11 @@ interface Transaction {
   dueDay?: number;
   isPaid?: boolean;
   totalAmount?: number;
+  location?: {
+    lat: number;
+    lng: number;
+    address?: string;
+  };
 }
 
 interface Card {
@@ -123,6 +131,7 @@ interface UserSettings {
   familyId?: string;
   duoEmail?: string;
   pendingInvite?: string;
+  pixKey?: string;
 }
 
 interface Notification {
@@ -142,6 +151,43 @@ const formatCurrency = (value: number) => {
 const parseCurrencyInput = (value: string): number => {
   const cleanValue = value.replace(/\D/g, '');
   return Number(cleanValue) / 100;
+};
+
+const getCurrentLocation = (): Promise<{ lat: number, lng: number, address?: string } | undefined> => {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(undefined);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          // Simple reverse geocoding using Nominatim (OpenStreetMap)
+          // Note: In a production app, you'd use a more robust service or your own backend
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`, {
+            headers: {
+              'Accept-Language': 'pt-BR'
+            }
+          });
+          const data = await response.json();
+          const address = data.address;
+          const street = address.road || address.suburb || '';
+          const city = address.city || address.town || address.village || '';
+          const formattedAddress = street && city ? `${street}, ${city}` : (data.display_name || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+          
+          resolve({ lat: latitude, lng: longitude, address: formattedAddress });
+        } catch (error) {
+          resolve({ lat: latitude, lng: longitude });
+        }
+      },
+      () => {
+        resolve(undefined);
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  });
 };
 
 // --- Currency Input Component ---
@@ -194,6 +240,8 @@ const CATEGORIES: Record<string, Category> = {
   Mensalidade: { name: 'Mensalidade', icon: <Home size={18} />, color: 'bg-emerald-500/10 text-emerald-500' },
   Assinatura: { name: 'Assinatura', icon: <Play size={18} />, color: 'bg-pink-500/10 text-pink-500' },
   Parcela: { name: 'Parcela', icon: <CreditCard size={18} />, color: 'bg-primary/10 text-primary' },
+  Mercado: { name: 'Mercado', icon: <ShoppingBag size={18} />, color: 'bg-blue-500/10 text-blue-500' },
+  'Pix do Rolê': { name: 'Pix do Rolê', icon: <Share2 size={18} />, color: 'bg-emerald-500/10 text-emerald-500' },
   Outros: { name: 'Outros', icon: <MoreHorizontal size={18} />, color: 'bg-slate-500/10 text-slate-500' },
 };
 
@@ -252,7 +300,7 @@ class ErrorBoundary extends Component<any, any> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center text-white">
+        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
             <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
               <AlertCircle size={32} />
@@ -304,7 +352,7 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     }
 
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center text-white">
+      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
         <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
           <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
             <AlertCircle size={32} />
@@ -367,9 +415,45 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string) => Promise<void> | void, privacyMode?: boolean, onClick?: () => void }> = ({ t, deleteTransaction, privacyMode, onClick }) => {
   const x = useMotionValue(0);
   const opacity = useTransform(x, [-60, -20, 0], [1, 0.5, 0]);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const handleDelete = async () => {
+    await deleteTransaction(t.id);
+    setShowConfirm(false);
+  };
 
   return (
     <div className="relative overflow-hidden rounded-[20px]">
+      <AnimatePresence>
+        {showConfirm && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-20 bg-[#1C1F2B]/95 backdrop-blur-sm flex items-center justify-between px-6"
+          >
+            <p className="text-xs font-bold text-white uppercase tracking-widest">Excluir?</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  setShowConfirm(false);
+                  x.set(0);
+                }}
+                className="px-4 py-2 bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
+              >
+                Não
+              </button>
+              <button 
+                onClick={handleDelete}
+                className="px-4 py-2 bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-500/20 active:scale-95 transition-transform"
+              >
+                Sim
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div 
         style={{ opacity }}
         className="absolute inset-0 bg-rose-600 flex items-center justify-end px-6 text-white"
@@ -381,9 +465,11 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
         style={{ x }}
         dragConstraints={{ left: -100, right: 0 }}
         dragElastic={0.1}
-        onDragEnd={(_, info) => {
-          if (info.offset.x < -60) {
-            deleteTransaction(t.id);
+        onDragEnd={() => {
+          if (x.get() < -60) {
+            setShowConfirm(true);
+          } else {
+            x.set(0);
           }
         }}
         onClick={onClick}
@@ -436,20 +522,27 @@ const TypingText = ({ text }: { text: string }) => {
   return <span>{displayedText}</span>;
 };
 
-const AIGoalsSummary = ({ transactions, settings }: { transactions: Transaction[], settings: UserSettings }) => {
-  const [insight, setInsight] = useState<string>("");
+const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[], settings: UserSettings }) => {
+  const [prediction, setPrediction] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const generateInsight = async () => {
+    const generatePrediction = async () => {
       try {
-        // Check cache
-        const cached = localStorage.getItem('oracle_insight');
-        const cachedTime = localStorage.getItem('oracle_insight_time');
         const now = new Date().getTime();
+        const cachedTime = localStorage.getItem('oracle_cache_time_v2');
         
-        if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
-          setInsight(cached);
+        // If cache is expired, clear both AI caches to force a synchronized update
+        if (cachedTime && (now - parseInt(cachedTime)) >= 8 * 60 * 60 * 1000) {
+          localStorage.removeItem('oracle_insight_v2');
+          localStorage.removeItem('lukinho_sincero_v2');
+        }
+
+        const cached = localStorage.getItem('lukinho_sincero_v2');
+        const currentCachedTime = localStorage.getItem('oracle_cache_time_v2');
+        
+        if (cached && currentCachedTime && (now - parseInt(currentCachedTime)) < 8 * 60 * 60 * 1000) {
+          setPrediction(cached);
           setLoading(false);
           return;
         }
@@ -461,37 +554,43 @@ const AIGoalsSummary = ({ transactions, settings }: { transactions: Transaction[
         const totalExpenses = transactions
           .filter(t => t.type === 'expense' && new Date(t.date).getMonth() === new Date().getMonth())
           .reduce((acc, curr) => acc + curr.amount, 0);
+        const limit = settings.monthlyLimit || totalIncome;
+        const balance = totalIncome - totalExpenses;
         
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
-          contents: `Analise estes dados financeiros: Renda R$${totalIncome}, Gastos R$${totalExpenses}. 
-          Gere um insight financeiro CURTO (máximo 15 palavras), inteligente, motivador e com uma linguagem jovem/moderna. 
-          Foque em encorajamento. Não use saudações.`
+          contents: `Analise estes dados financeiros: Renda R$${totalIncome}, Gastos R$${totalExpenses}, Saldo R$${balance}, Limite R$${limit}. 
+          Gere uma previsão para o ÚLTIMO DIA DO MÊS. 
+          O tom deve ser CÔMICO, DESCOLADO e SINCERO (estilo "Lukinho", jovem e zueiro). 
+          Se o saldo for positivo, brinque que ele vai ser o novo Elon Musk. 
+          Se for negativo ou perto do limite, faça uma piada ácida sobre ele ter que comer miojo ou vender a alma. 
+          Máximo 15 palavras. Responda apenas a frase.`,
         });
         
-        const newInsight = response.text || "Economizar é o novo hype. Continue focado!";
-        setInsight(newInsight);
-        localStorage.setItem('oracle_insight', newInsight);
-        localStorage.setItem('oracle_insight_time', now.toString());
+        const newPrediction = response.text || 'Lukinho está sem palavras para sua conta bancária.';
+        setPrediction(newPrediction);
+        localStorage.setItem('lukinho_sincero_v2', newPrediction);
+        localStorage.setItem('oracle_cache_time_v2', now.toString());
       } catch (error) {
-        setInsight("Economizar é o novo hype. Continue focado!");
+        console.error('Error generating prediction:', error);
+        setPrediction('Lukinho está calculando seu futuro financeiro...');
       } finally {
         setLoading(false);
       }
     };
 
-    generateInsight();
+    generatePrediction();
   }, [transactions.length, settings.monthlyLimit]);
 
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mb-12"
+      className="mb-8"
     >
       <div className="flex items-center gap-2 mb-4">
         <Sparkles size={16} className="text-primary" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Insight do Oráculo</span>
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lukinho Sincero</span>
       </div>
       
       {loading ? (
@@ -502,9 +601,9 @@ const AIGoalsSummary = ({ transactions, settings }: { transactions: Transaction[
         <motion.p 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-3xl font-black text-primary leading-tight tracking-tight"
+          className="text-3xl font-black text-primary leading-[1.4] tracking-tight"
         >
-          <TypingText text={insight} />
+          <TypingText text={prediction} />
         </motion.p>
       )}
     </motion.div>
@@ -540,6 +639,8 @@ export default function App() {
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [pixShareData, setPixShareData] = useState<{ amountPerPerson: number, pixKey: string } | null>(null);
+  const [isEditingPixKey, setIsEditingPixKey] = useState(false);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -552,6 +653,11 @@ export default function App() {
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    
+    // Request geolocation permission on first load
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(() => {}, () => {});
+    }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -566,18 +672,13 @@ export default function App() {
       setDeferredPrompt(null);
     }
   };
-  // --- Push Notifications Permission ---
-  useEffect(() => {
-    if (settings.pushNotifications && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, [settings.pushNotifications]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [activeTab]);
 
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const [newTransCategory, setNewTransCategory] = useState('Variados');
   const [newTransCardId, setNewTransCardId] = useState('');
@@ -617,11 +718,10 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Settings (always by UID)
     const unsubSettings = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const newSettings: UserSettings = {
+        setSettings({
           incomes: data.incomes || [],
           monthlyLimit: data.monthlyLimit || 0,
           emailNotifications: data.emailNotifications || false,
@@ -631,49 +731,51 @@ export default function App() {
           readNotificationIds: data.readNotificationIds || [],
           familyId: data.familyId,
           duoEmail: data.duoEmail,
-          pendingInvite: data.pendingInvite
-        };
-        setSettings(newSettings);
-
-        // Now set up transactions and cards based on familyId or uid
-        const targetId = data.familyId || user.uid;
-        const idField = data.familyId ? 'familyId' : 'uid';
-
-        const qTransactions = query(
-          collection(db, 'transactions'), 
-          where(idField, '==', targetId),
-          orderBy('date', 'desc')
-        );
-        const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
-          const transData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            date: (doc.data().date as Timestamp).toDate()
-          })) as Transaction[];
-          setTransactions(transData);
-        }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
-
-        const qCards = query(collection(db, 'cards'), where(idField, '==', targetId));
-        const unsubCards = onSnapshot(qCards, (snapshot) => {
-          const cardData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Card[];
-          cardData.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-          setCards(cardData);
-        }, (err) => handleFirestoreError(err, OperationType.LIST, 'cards'));
-
-        // Cleanup previous listeners if targetId changed? 
-        // Actually, onSnapshot returns a cleanup function.
-        // But since this is inside another onSnapshot, it's tricky.
-        // For simplicity, I'll just return the settings unsub.
+          pendingInvite: data.pendingInvite,
+          pixKey: data.pixKey
+        });
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
 
-    return () => {
-      unsubSettings();
-    };
+    return () => unsubSettings();
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const targetId = settings.familyId || user.uid;
+    const idField = settings.familyId ? 'familyId' : 'uid';
+
+    const qTransactions = query(
+      collection(db, 'transactions'), 
+      where(idField, '==', targetId),
+      orderBy('date', 'desc')
+    );
+    
+    const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
+      const transData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: (doc.data().date as Timestamp).toDate()
+      })) as Transaction[];
+      setTransactions(transData);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
+
+    const qCards = query(collection(db, 'cards'), where(idField, '==', targetId));
+    const unsubCards = onSnapshot(qCards, (snapshot) => {
+      const cardData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Card[];
+      cardData.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      setCards(cardData);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'cards'));
+
+    return () => {
+      unsubTransactions();
+      unsubCards();
+    };
+  }, [user, settings.familyId]);
 
   // --- Actions ---
   const handleLogin = async () => {
@@ -691,6 +793,7 @@ export default function App() {
     try {
       console.log('Adding transaction:', t);
       const baseDate = new Date();
+      const location = await getCurrentLocation();
       
       // Clean up undefined values for Firestore
       const cleanObject = (obj: any) => {
@@ -703,7 +806,30 @@ export default function App() {
         return newObj;
       };
       
-      if (t.category === 'Parcela' && t.installmentsCount && t.installmentsCount > 1) {
+      if (t.category === 'Pix do Rolê') {
+        const peopleCount = (t as any).peopleCount || 1;
+        const amountPerPerson = Number((t.amount / peopleCount).toFixed(2));
+        
+        const newDoc = cleanObject({
+          ...t,
+          amount: amountPerPerson,
+          uid: user.uid,
+          familyId: settings.familyId,
+          date: Timestamp.fromDate(baseDate),
+          location: location,
+          pixKey: settings.pixKey
+        });
+        delete (newDoc as any).peopleCount;
+        
+        await addDoc(collection(db, 'transactions'), newDoc);
+        
+        if (settings.pixKey) {
+          setPixShareData({
+            amountPerPerson: amountPerPerson,
+            pixKey: settings.pixKey
+          });
+        }
+      } else if (t.category === 'Parcela' && t.installmentsCount && t.installmentsCount > 1) {
         const parentId = Math.random().toString(36).substr(2, 9);
         const totalAmount = t.amount;
         const installmentAmount = Number((totalAmount / t.installmentsCount).toFixed(2));
@@ -731,7 +857,29 @@ export default function App() {
             date: Timestamp.fromDate(installmentDate),
             installmentIndex: i + 1,
             parentTransactionId: parentId,
-            installmentsCount: t.installmentsCount
+            installmentsCount: t.installmentsCount,
+            location: location
+          });
+          await addDoc(collection(db, 'transactions'), newDoc);
+        }
+      } else if (t.category === 'Mensalidade' || t.category === 'Assinatura') {
+        const parentId = Math.random().toString(36).substr(2, 9);
+        // Create 12 months of recurring transactions as separate docs
+        for (let i = 0; i < 12; i++) {
+          const transDate = new Date(baseDate);
+          transDate.setMonth(baseDate.getMonth() + i);
+          if (t.dueDay) {
+            transDate.setDate(t.dueDay);
+          }
+          
+          const newDoc = cleanObject({
+            ...t,
+            uid: user.uid,
+            familyId: settings.familyId,
+            date: Timestamp.fromDate(transDate),
+            isRecurring: true,
+            parentTransactionId: parentId,
+            location: location
           });
           await addDoc(collection(db, 'transactions'), newDoc);
         }
@@ -746,7 +894,8 @@ export default function App() {
           uid: user.uid,
           familyId: settings.familyId,
           date: Timestamp.fromDate(transDate),
-          isRecurring: t.category === 'Mensalidade' || t.category === 'Assinatura'
+          isRecurring: false,
+          location: location
         });
         await addDoc(collection(db, 'transactions'), newDoc);
       }
@@ -821,6 +970,41 @@ export default function App() {
       console.error('Error accepting invite:', err);
     }
   };
+  const updateTransaction = async (id: string, data: Partial<Transaction>) => {
+    if (!user) return;
+    try {
+      const t = transactions.find(item => item.id === id);
+      
+      // If title is changing and it's part of a group (installments/recurring)
+      if (data.title && t?.parentTransactionId) {
+        const relatedTransactions = transactions.filter(item => 
+          item.parentTransactionId === t.parentTransactionId && item.id !== id
+        );
+        
+        // Update the current one
+        await updateDoc(doc(db, 'transactions', id), data);
+        
+        // Update related ones
+        for (const related of relatedTransactions) {
+          let newTitle = data.title;
+          
+          // If it's an installment, preserve the (i/n) part
+          if (related.installmentIndex && related.installmentsCount) {
+            // Remove any existing (i/n) from the new title if the user accidentally included it
+            const cleanTitle = data.title.replace(/\s\(\d+\/\d+\)$/, '');
+            newTitle = `${cleanTitle} (${related.installmentIndex}/${related.installmentsCount})`;
+          }
+          
+          await updateDoc(doc(db, 'transactions', related.id), { title: newTitle });
+        }
+      } else {
+        await updateDoc(doc(db, 'transactions', id), data);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `transactions/${id}`);
+    }
+  };
+
   const deleteTransaction = async (id: string) => {
     if (!user) return;
     try {
@@ -938,7 +1122,13 @@ export default function App() {
 
     return transactions.filter(t => {
       const tDate = new Date(t.date);
-      return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear && !t.isPaid;
+      const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+      
+      // Recurring/Subscription logic: show in future months
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+      
+      return isSameMonth || (isRecurring && isFutureOrCurrent);
     });
   }, [transactions, selectedMonth]);
 
@@ -950,81 +1140,78 @@ export default function App() {
       const tDate = new Date(t.date);
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
       
-      // If it's a future month, also include recurring transactions
-      const isFuture = currentYear > new Date().getFullYear() || (currentYear === new Date().getFullYear() && currentMonth > new Date().getMonth());
-      if (isFuture && t.isRecurring) {
-        return true;
-      }
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
-      return isSameMonth;
+      return isSameMonth || (isRecurring && isFutureOrCurrent);
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [transactions, selectedMonth]);
 
-  const billsDueToday = useMemo(() => {
+  const billsDueThisWeek = useMemo(() => {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const todayDay = today.getDate();
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
-    today.setHours(0, 0, 0, 0);
     
-    // Individual bills (not linked to cards)
-    const individualBillsRaw = transactions.filter(t => {
+    // End of current week (Sunday)
+    const endOfWeek = new Date(today);
+    const day = today.getDay();
+    const diff = 6 - day; // days until Saturday
+    endOfWeek.setDate(today.getDate() + diff + 1); // Sunday morning
+    endOfWeek.setHours(0, 0, 0, 0);
+
+    // Individual bills
+    const individualBills = transactions.filter(t => {
       if (t.type !== 'expense' || t.isPaid || t.cardId) return false;
-      
-      // Only show recurring or installments as "bills" to pay
-      // A "lançamento diário" (daily entry) like "Pastelaria" shouldn't be here
       const isBill = t.isRecurring || (t.installmentsCount && t.installmentsCount > 1);
       if (!isBill) return false;
 
       const tDate = new Date(t.date);
       tDate.setHours(0, 0, 0, 0);
       
-      // Due today or in the past within the same month/year
-      // If it's from a previous month and still unpaid, it's overdue
-      const isSameMonthYear = tDate.getFullYear() === currentYear && tDate.getMonth() === currentMonth;
-      const isPastMonthYear = tDate.getFullYear() < currentYear || (tDate.getFullYear() === currentYear && tDate.getMonth() < currentMonth);
-
-      return (isSameMonthYear && tDate.getDate() <= todayDay) || isPastMonthYear;
-    });
-
-    const individualBills: any[] = [];
-    individualBillsRaw.forEach(t => {
+      // Overdue or due within this week
+      return tDate < endOfWeek;
+    }).map(t => {
       const tDate = new Date(t.date);
-      const isOverdue = tDate.getFullYear() < currentYear || 
-                        (tDate.getFullYear() === currentYear && tDate.getMonth() < currentMonth) ||
-                        (tDate.getFullYear() === currentYear && tDate.getMonth() === currentMonth && tDate.getDate() < todayDay);
-      individualBills.push({ ...t, isCardBill: false, isOverdue });
+      tDate.setHours(0, 0, 0, 0);
+      return {
+        ...t,
+        isCardBill: false,
+        isOverdue: tDate < today
+      };
     });
 
-    // Card bills due today or overdue
+    // Card bills
     const cardBills = cards.filter(card => {
       if (!card.dueDay) return false;
       
-      // If dueDay is today or has passed this month
-      const isDueOrPast = card.dueDay <= todayDay;
+      const dueDateThisMonth = new Date(currentYear, currentMonth, card.dueDay);
+      dueDateThisMonth.setHours(0, 0, 0, 0);
+
+      const isDueThisWeekOrPast = dueDateThisMonth < endOfWeek;
       
-      // Check if there are unpaid transactions for this card this month or previous months
-      const unpaidTransactions = transactions.filter(t => 
+      if (!isDueThisWeekOrPast) return false;
+
+      const unpaid = transactions.filter(t => 
         t.cardId === card.id && 
         t.type === 'expense' && 
         !t.isPaid &&
-        (new Date(t.date).getFullYear() < currentYear || 
-         (new Date(t.date).getFullYear() === currentYear && new Date(t.date).getMonth() <= currentMonth))
+        (new Date(t.date) <= dueDateThisMonth)
       );
       
-      return isDueOrPast && unpaidTransactions.length > 0;
+      return unpaid.length > 0;
     }).map(card => {
-      const isOverdue = card.dueDay! < todayDay;
-      const unpaid = transactions.filter(t => {
-        const tDate = new Date(t.date);
-        return t.cardId === card.id && 
-               t.type === 'expense' && 
-               !t.isPaid &&
-               (tDate.getFullYear() < currentYear || 
-                (tDate.getFullYear() === currentYear && tDate.getMonth() <= currentMonth));
-      });
-
-      // Sum the amounts of unpaid transactions up to current month
+      const dueDateThisMonth = new Date(currentYear, currentMonth, card.dueDay!);
+      dueDateThisMonth.setHours(0, 0, 0, 0);
+      const isOverdue = dueDateThisMonth < today;
+      
+      const unpaid = transactions.filter(t => 
+        t.cardId === card.id && 
+        t.type === 'expense' && 
+        !t.isPaid &&
+        (new Date(t.date) <= dueDateThisMonth)
+      );
       const amount = unpaid.reduce((acc, t) => acc + t.amount, 0);
 
       return {
@@ -1034,13 +1221,31 @@ export default function App() {
         amount,
         category: 'Cartão',
         isCardBill: true,
-        date: today,
+        date: dueDateThisMonth,
         isOverdue
       };
     });
 
-    return [...individualBills, ...cardBills].sort((a, b) => (b.isOverdue ? 1 : 0) - (a.isOverdue ? 1 : 0));
+    return [...individualBills, ...cardBills].sort((a, b) => {
+      if (a.isOverdue && !b.isOverdue) return -1;
+      if (!a.isOverdue && b.isOverdue) return 1;
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
   }, [transactions, cards]);
+
+  // --- Email Notifications Effect ---
+  useEffect(() => {
+    if (settings.emailNotifications && user?.email && billsDueThisWeek.length > 0) {
+      const todayStr = new Date().toDateString();
+      const lastSent = localStorage.getItem(`email_sent_${user.uid}`);
+      
+      if (lastSent !== todayStr) {
+        console.log(`[Email Notification] Sending to ${user.email}: Você tem ${billsDueThisWeek.length} conta(s) para pagar esta semana.`);
+        // In a real app, this would call a backend service.
+        localStorage.setItem(`email_sent_${user.uid}`, todayStr);
+      }
+    }
+  }, [settings.emailNotifications, billsDueThisWeek.length, user]);
 
 
   const categoryData = useMemo(() => {
@@ -1073,9 +1278,12 @@ export default function App() {
     const monthlyExpenses = transactions
       .filter(t => {
         const tDate = new Date(t.date);
-        return t.type === 'expense' && 
-               tDate.getMonth() === currentMonth && 
-               tDate.getFullYear() === currentYear;
+        const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+        
+        const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+        const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+        
+        return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
       })
       .reduce((acc, t) => acc + t.amount, 0);
     
@@ -1155,6 +1363,19 @@ export default function App() {
         title: 'Orçamento Crítico',
         message: `Você já utilizou ${Math.round(stats.progress)}% do seu orçamento mensal!`,
         type: 'warning',
+        date: new Date()
+      });
+    }
+
+    // Check Lukinho tab visit
+    const lastVisit = localStorage.getItem('lastLukinhoVisit');
+    const todayStr = new Date().toDateString();
+    if (lastVisit !== todayStr) {
+      list.push({
+        id: 'lukinho-visit',
+        title: 'Lukinho te chama!',
+        message: 'Ei! O Lukinho está com saudades. Vem ver como está sua vida financeira hoje! 🚀',
+        type: 'info',
         date: new Date()
       });
     }
@@ -1245,7 +1466,7 @@ export default function App() {
                 className="relative p-2 flex items-center justify-center"
               >
                 <Bell size={20} className={notifications.length > 0 ? "text-white" : "text-slate-400"} />
-                {!notificationsRead && notifications.length > 0 && (
+                {notifications.length > 0 && !notificationsRead && (
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#0F111A]" />
                 )}
               </button>
@@ -1326,11 +1547,11 @@ export default function App() {
                       </h2>
                       
                       <div className="space-y-3">
-                        <div className="h-2.5 bg-black/10 rounded-full overflow-hidden">
+                        <div className="h-2.5 bg-[#0F111A]/20 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
                             animate={{ width: `${Math.min(100, stats.progress)}%` }}
-                            className="h-full bg-black rounded-full shadow-[0_0_10px_rgba(0,0,0,0.1)]"
+                            className="h-full bg-[#0F111A] rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)]"
                           />
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-on-primary/60 font-medium">
@@ -1372,7 +1593,7 @@ export default function App() {
                                 <div className="flex justify-between items-start">
                                   <CreditCard className="opacity-80" size={24} />
                                   {card.dueDay && (
-                                    <span className="text-[10px] font-bold opacity-60 bg-black/20 px-2 py-1 rounded-lg">Vence dia {card.dueDay}</span>
+                                    <span className="text-[10px] font-bold opacity-60 bg-[#0F111A]/20 px-2 py-1 rounded-lg">Vence dia {card.dueDay}</span>
                                   )}
                                 </div>
                                 <div>
@@ -1411,38 +1632,38 @@ export default function App() {
                     </div>
                   </section>
 
-                  {billsDueToday.length > 0 && (
+                  {billsDueThisWeek.length > 0 && (
                     <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                       <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-lg text-primary flex items-center gap-2">
                           <Calendar size={20} className="relative -top-[1px]" />
-                          Pagar hoje
+                          Pagar
                         </h3>
                       </div>
                       <div className="space-y-3">
                         <AnimatePresence mode="popLayout">
-                          {billsDueToday.map((t) => (
+                          {billsDueThisWeek.map((t) => (
                             <motion.div 
                               key={t.id}
                               layout
                               initial={{ opacity: 0, scale: 0.95 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.9, x: -20 }}
-                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-primary/10 border-primary/20'} border rounded-2xl p-4 flex items-center justify-between`}
+                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-slate-800/40 border-slate-800/50'} border rounded-2xl p-4 flex items-center justify-between`}
                             >
                               <div className="flex items-center gap-3 min-w-0 flex-1">
-                                <div className={`w-10 h-10 flex-shrink-0 ${t.isOverdue ? 'bg-rose-500/20 text-rose-500' : 'bg-primary/20 text-primary'} rounded-xl flex items-center justify-center`}>
+                                <div className={`w-10 h-10 flex-shrink-0 ${t.isOverdue ? 'bg-rose-500/20 text-rose-500' : 'bg-slate-800 text-slate-400'} rounded-xl flex items-center justify-center`}>
                                   {CATEGORIES[t.category]?.icon || <MoreHorizontal size={18} />}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <p className={`text-sm font-bold truncate pr-2 ${t.isOverdue ? 'text-rose-500' : 'text-white'}`}>{t.title}</p>
-                                  <p className={`text-[10px] ${t.isOverdue ? 'text-rose-500/60' : 'text-primary/60'} font-bold uppercase tracking-widest truncate`}>
+                                  <p className={`text-[10px] ${t.isOverdue ? 'text-rose-500/60' : 'text-slate-500'} font-bold uppercase tracking-widest truncate`}>
                                     {t.category} {t.isOverdue && '• ATRASADO'}
                                   </p>
                                 </div>
                               </div>
                               <div className="flex flex-col items-end gap-2 flex-shrink-0 ml-4">
-                                <p className={`text-sm font-black ${t.isOverdue ? 'text-rose-500' : 'text-primary'}`}>
+                                <p className={`text-sm font-black ${t.isOverdue ? 'text-rose-500' : 'text-white'}`}>
                                   {settings.privacyMode ? '••••••' : formatCurrency(t.amount)}
                                 </p>
                                 <button 
@@ -1505,8 +1726,13 @@ export default function App() {
               </div>
               
               <div className="space-y-6">
-                {extratoTransactions.length === 0 ? (
-                  <p className="text-center text-slate-500 py-12">Nenhuma transação encontrada.</p>
+                {extratoTransactions.filter(t => selectedHistoryCategory === 'Todas' || t.category === selectedHistoryCategory).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-center">
+                    <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-slate-600 mb-4">
+                      <History size={32} />
+                    </div>
+                    <p className="text-slate-500 font-bold">Sem lançamentos</p>
+                  </div>
                 ) : (
                   <>
                     <div className="space-y-3">
@@ -1528,28 +1754,41 @@ export default function App() {
                     {/* Summary at the end of the list */}
                     <div className="mt-8 pb-12">
                       <div className="flex justify-between items-start">
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Ganhos</p>
-                          <p className="text-xl font-black text-emerald-500">
-                            {formatCurrency(settings.incomes.reduce((acc, curr) => acc + curr.value, 0))}
-                          </p>
-                        </div>
-                        <div className="text-right space-y-1">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gastos</p>
-                          <p className="text-xl font-black text-white">
-                            {formatCurrency(extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0))}
-                          </p>
-                          {(() => {
-                            const totalInc = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
-                            const totalExp = extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0);
-                            const diff = totalInc - totalExp;
-                            return (
-                              <p className={`text-[10px] font-bold ${diff >= 0 ? 'text-primary/60' : 'text-rose-500/60'} uppercase tracking-widest`}>
-                                {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                        {selectedHistoryCategory === 'Todas' ? (
+                          <>
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Ganhos</p>
+                              <p className="text-xl font-black text-emerald-500">
+                                {formatCurrency(settings.incomes.reduce((acc, curr) => acc + curr.value, 0))}
                               </p>
-                            );
-                          })()}
-                        </div>
+                            </div>
+                            <div className="text-right space-y-1">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gastos</p>
+                              <p className="text-xl font-black text-white">
+                                {formatCurrency(extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0))}
+                              </p>
+                              {(() => {
+                                const totalInc = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
+                                const totalExp = extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0);
+                                const diff = totalInc - totalExp;
+                                return (
+                                  <p className={`text-[10px] font-bold ${diff >= 0 ? 'text-primary/60' : 'text-rose-500/60'} uppercase tracking-widest`}>
+                                    {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                                  </p>
+                                );
+                              })()}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="w-full text-right">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total em {selectedHistoryCategory}</p>
+                              <p className="text-2xl font-black text-white">
+                                {formatCurrency(extratoTransactions.filter(t => t.category === selectedHistoryCategory).reduce((acc, curr) => acc + curr.amount, 0))}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </>
@@ -1559,10 +1798,17 @@ export default function App() {
           )}
 
           {activeTab === 'goals' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-6 pb-24 max-w-md mx-auto">
-              <AIGoalsSummary transactions={transactions} settings={settings} />
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              className="p-6 pb-4 max-w-md mx-auto"
+              onViewportEnter={() => {
+                localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
+              }}
+            >
+              <LukinhoSincero transactions={transactions} settings={settings} />
 
-              <div className="mb-6">
+              <div className="mb-2">
                 {(() => {
                   const currentMonthExpenses = transactions.filter(t => 
                     t.type === 'expense' && 
@@ -1574,17 +1820,20 @@ export default function App() {
                   currentMonthExpenses.forEach(t => {
                     categories[t.category] = (categories[t.category] || 0) + t.amount;
                   });
+                  
+                  const total = currentMonthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+                  
                   const categoryData = Object.entries(categories)
                     .map(([name, value]) => ({ name, value }))
+                    .filter(item => total > 0 && Math.round((item.value / total) * 100) > 0)
                     .sort((a, b) => b.value - a.value);
 
                   const COLORS = ['#cdfc54', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#10b981'];
-                  const total = currentMonthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
 
                   return (
                     <>
                       <div className="h-[260px] w-full relative">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="99%" height={260} debounce={50}>
                           <PieChart>
                             <Pie
                               data={categoryData}
@@ -1611,16 +1860,29 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="space-y-3 mt-6">
-                        {categoryData.map((item, index) => (
-                          <div key={item.name} className="flex items-center justify-between p-3 bg-[#1C1F2B]/50 rounded-2xl border border-slate-800/30">
-                            <div className="flex items-center gap-3">
-                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                              <p className="text-xs font-bold text-slate-300 uppercase tracking-wider">{item.name}</p>
+                      <div className="space-y-3 mt-6 mb-4 relative">
+                        {categoryData.map((item) => (
+                          <div 
+                            key={item.name} 
+                            onClick={() => {
+                              setSelectedHistoryCategory(item.name);
+                              setActiveTab('history');
+                            }}
+                            className="flex items-center justify-between p-4 bg-[#1C1F2B] rounded-2xl border border-slate-800/50 active:scale-[0.98] transition-transform cursor-pointer"
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${CATEGORIES[item.name]?.color || 'bg-slate-800 text-slate-400'}`}>
+                                {CATEGORIES[item.name]?.icon || <MoreHorizontal size={18} />}
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-white">{item.name}</p>
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                  {total > 0 ? Math.round((item.value / total) * 100) : 0}% do total
+                                </p>
+                              </div>
                             </div>
                             <div className="text-right">
-                              <p className="text-xs font-black text-white">{total > 0 ? Math.round((item.value / total) * 100) : 0}%</p>
-                              <p className="text-[10px] font-bold text-slate-500">{formatCurrency(item.value)}</p>
+                              <p className="text-sm font-black text-white">{formatCurrency(item.value)}</p>
                             </div>
                           </div>
                         ))}
@@ -1801,7 +2063,7 @@ export default function App() {
                         </p>
                         <button 
                           onClick={acceptInvite}
-                          className="w-full py-3 bg-amber-500 text-black font-bold rounded-xl text-sm active:scale-95 transition-transform"
+                          className="w-full py-3 bg-amber-500 text-[#0f111a] font-bold rounded-xl text-sm active:scale-95 transition-transform"
                         >
                           Aceitar Convite
                         </button>
@@ -1816,6 +2078,7 @@ export default function App() {
                             id="spouse-email-input"
                             type="email"
                             placeholder="E-mail do parceiro(a)"
+                            defaultValue={settings.duoEmail || settings.pendingInvite || ''}
                             className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors min-w-0"
                           />
                           <button 
@@ -1828,7 +2091,7 @@ export default function App() {
                             }}
                             className="w-11 h-11 bg-primary text-on-primary font-bold rounded-xl flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
                           >
-                            <Plus size={20} />
+                            {settings.duoEmail || settings.pendingInvite ? <Edit2 size={20} /> : <Plus size={20} />}
                           </button>
                         </div>
                       </div>
@@ -1859,7 +2122,28 @@ export default function App() {
                       >
                         <motion.div 
                           animate={{ x: settings.pushNotifications ? 26 : 4 }}
-                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.pushNotifications ? 'bg-black' : 'bg-white'}`}
+                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.pushNotifications ? 'bg-[#0F111A]' : 'bg-white'}`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                          <Mail size={20} />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-sm font-bold">Notificações por e-mail</p>
+                          <p className="text-[10px] text-slate-500">Alertas no dia do vencimento</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => updateSettings({ emailNotifications: !settings.emailNotifications })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.emailNotifications ? 'bg-primary' : 'bg-slate-700'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: settings.emailNotifications ? 26 : 4 }}
+                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.emailNotifications ? 'bg-[#0F111A]' : 'bg-white'}`}
                         />
                       </button>
                     </div>
@@ -1889,7 +2173,7 @@ export default function App() {
                       >
                         <motion.div 
                           animate={{ x: settings.biometricsEnabled ? 26 : 4 }}
-                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.biometricsEnabled ? 'bg-black' : 'bg-white'}`}
+                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.biometricsEnabled ? 'bg-[#0F111A]' : 'bg-white'}`}
                         />
                       </button>
                     </div>
@@ -1913,6 +2197,48 @@ export default function App() {
                         </button>
                       </div>
                     )}
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion 
+                  title="Pix do Rolê" 
+                  icon={<Share2 size={20} />}
+                  isOpen={openedAccordion === 'pix'}
+                  onToggle={() => setOpenedAccordion(openedAccordion === 'pix' ? null : 'pix')}
+                >
+                  <div className="space-y-4 text-left">
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Cadastre sua chave Pix para gerar mensagens de cobrança automática ao dividir contas.
+                    </p>
+                    <div className="flex gap-2">
+                      <input 
+                        id="pix-key-input"
+                        type="text"
+                        placeholder="Sua chave Pix"
+                        defaultValue={settings.pixKey || ''}
+                        disabled={!!settings.pixKey && !isEditingPixKey}
+                        className={`flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors min-w-0 ${!!settings.pixKey && !isEditingPixKey ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      />
+                      <button 
+                        onClick={() => {
+                          if (!!settings.pixKey && !isEditingPixKey) {
+                            setIsEditingPixKey(true);
+                            const input = document.getElementById('pix-key-input') as HTMLInputElement;
+                            if (input) input.focus();
+                            return;
+                          }
+                          
+                          const input = document.getElementById('pix-key-input') as HTMLInputElement;
+                          if (input?.value) {
+                            updateSettings({ pixKey: input.value });
+                            setIsEditingPixKey(false);
+                          }
+                        }}
+                        className="w-11 h-11 bg-primary text-on-primary font-bold rounded-xl flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
+                      >
+                        {settings.pixKey && !isEditingPixKey ? <Edit2 size={20} /> : <Plus size={20} />}
+                      </button>
+                    </div>
                   </div>
                 </SettingsAccordion>
               </div>
@@ -1951,9 +2277,12 @@ export default function App() {
             <div className="w-12" />
             <NavButton 
               active={activeTab === 'goals'} 
-              onClick={() => setActiveTab('goals')} 
+              onClick={() => {
+                setActiveTab('goals');
+                localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
+              }} 
               icon={<Sparkles size={20} />} 
-              label="Oráculo" 
+              label="Lukinho" 
             />
             <NavButton active={activeTab === 'more'} onClick={() => setActiveTab('more')} icon={<SettingsIcon size={20} />} label="Ajustes" />
           </div>
@@ -1976,6 +2305,7 @@ export default function App() {
                   
                   const category = formData.get('category') as string;
                   const installmentsCount = category === 'Parcela' ? parseInt(formData.get('installmentsCount') as string) || 1 : undefined;
+                  const peopleCount = category === 'Pix do Rolê' ? parseInt(formData.get('peopleCount') as string) || 1 : undefined;
                   const cardId = formData.get('cardId') as string || undefined;
                   const dueDay = cardId ? undefined : ((category === 'Parcela' || category === 'Mensalidade' || category === 'Assinatura') ? parseInt(formData.get('dueDay') as string) || undefined : undefined);
                   
@@ -1986,8 +2316,10 @@ export default function App() {
                     category: category,
                     cardId: cardId,
                     installmentsCount: installmentsCount,
-                    dueDay: dueDay
-                  });
+                    dueDay: dueDay,
+                    peopleCount: peopleCount
+                  } as any);
+                  setIsModalOpen(false);
                 }} className="space-y-4">
                   <input name="title" required className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" placeholder="Título" />
                   
@@ -2011,8 +2343,25 @@ export default function App() {
                     className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
                     onChange={(e) => setNewTransCategory(e.target.value)}
                   >
-                    {Object.keys(CATEGORIES).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    {Object.keys(CATEGORIES)
+                      .filter(cat => cat !== 'Pix do Rolê' || settings.pixKey)
+                      .map(cat => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
+
+                  {newTransCategory === 'Pix do Rolê' && (
+                    <div className="w-full">
+                      <select 
+                        name="peopleCount" 
+                        required
+                        className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        <option value="">Dividir em quantas pessoas?</option>
+                        {[2, 3, 4, 5, 6, 7, 8].map(num => (
+                          <option key={num} value={num}>{num} pessoas</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className={`${(newTransCategory === 'Parcela' || newTransCategory === 'Mensalidade' || newTransCategory === 'Assinatura') && !newTransCardId ? 'grid grid-cols-2' : 'block'} gap-4`}>
                     {newTransCategory === 'Parcela' && (
@@ -2044,6 +2393,58 @@ export default function App() {
                   </div>
                   <button type="submit" className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20 mt-4">Salvar</button>
                 </form>
+              </motion.div>
+            </div>
+          )}
+
+          {pixShareData && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                onClick={() => setPixShareData(null)} 
+                className="absolute inset-0 bg-black/80 backdrop-blur-md" 
+              />
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }} 
+                animate={{ scale: 1, opacity: 1 }} 
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800 text-center"
+              >
+                <div className="w-20 h-20 bg-emerald-500/10 rounded-3xl flex items-center justify-center text-emerald-500 mx-auto mb-6">
+                  <Share2 size={40} />
+                </div>
+                <h3 className="text-2xl font-black mb-4">Pix do Rolê!</h3>
+                <p className="text-slate-400 mb-8 leading-relaxed">
+                  A conta deu <span className="text-white font-bold">{formatCurrency(pixShareData.amountPerPerson)}</span> para cada um.
+                </p>
+                
+                <div className="bg-[#0F111A] p-4 rounded-2xl mb-8 text-left border border-slate-800">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Mensagem para o WhatsApp</p>
+                  <p className="text-sm text-slate-300 italic">
+                    "Galera, a conta deu {formatCurrency(pixShareData.amountPerPerson)} pra cada. Meu Pix é {pixShareData.pixKey}"
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={() => {
+                      const message = `Galera, a conta deu ${formatCurrency(pixShareData.amountPerPerson)} pra cada. Meu Pix é ${pixShareData.pixKey}`;
+                      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+                      setPixShareData(null);
+                    }}
+                    className="w-full bg-emerald-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                  >
+                    Compartilhar no WhatsApp
+                  </button>
+                  <button 
+                    onClick={() => setPixShareData(null)}
+                    className="w-full bg-slate-800 text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform"
+                  >
+                    Agora não
+                  </button>
+                </div>
               </motion.div>
             </div>
           )}
@@ -2211,43 +2612,43 @@ export default function App() {
                 initial={{ y: 100, opacity: 0 }} 
                 animate={{ y: 0, opacity: 1 }} 
                 exit={{ y: 100, opacity: 0 }}
-                className="bg-[#1C1F2B] w-full max-w-sm rounded-t-[40px] sm:rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-t-[40px] sm:rounded-[40px] p-6 relative z-10 shadow-2xl border border-slate-800"
               >
-                <div className="w-12 h-1.5 bg-slate-800 rounded-full mx-auto mb-8 sm:hidden" />
+                <div className="w-12 h-1 bg-slate-800 rounded-full mx-auto mb-6 sm:hidden" />
                 
-                <div className="flex flex-col items-center text-center mb-8">
-                  <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-4 ${CATEGORIES[selectedTransaction.category]?.color || 'bg-slate-800 text-slate-400'}`}>
+                <div className="flex flex-col items-center text-center mb-6">
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-3 ${CATEGORIES[selectedTransaction.category]?.color || 'bg-slate-800 text-slate-400'}`}>
                     {getInteractiveIcon(selectedTransaction.title, selectedTransaction.category)}
                   </div>
-                  <h3 className="text-2xl font-black mb-1">{selectedTransaction.title}</h3>
-                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">{selectedTransaction.category}</p>
+                  <h3 className="text-xl font-black mb-1">{selectedTransaction.title}</h3>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">{selectedTransaction.category}</p>
                 </div>
 
-                <div className="space-y-6 mb-8">
-                  <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
-                    <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Valor</span>
-                    <span className={`text-xl font-black ${selectedTransaction.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
+                <div className="space-y-2 mb-6">
+                  <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                    <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Valor</span>
+                    <span className={`text-sm font-bold ${selectedTransaction.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
                       {formatCurrency(selectedTransaction.amount)}
                     </span>
                   </div>
                   
-                  <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
-                    <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Data</span>
+                  <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                    <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Data</span>
                     <span className="text-sm font-bold">{selectedTransaction.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
                   </div>
 
                   {selectedTransaction.installmentsCount && selectedTransaction.installmentsCount > 1 && (
                     <>
-                      <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
-                        <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Parcela</span>
+                      <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Parcela</span>
                         <span className="text-sm font-bold">{selectedTransaction.installmentIndex} de {selectedTransaction.installmentsCount}</span>
                       </div>
-                      <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
-                        <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Valor Total</span>
+                      <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Valor Total</span>
                         <span className="text-sm font-bold">{formatCurrency(selectedTransaction.totalAmount || (selectedTransaction.amount * selectedTransaction.installmentsCount))}</span>
                       </div>
-                      <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
-                        <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Restante</span>
+                      <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Restante</span>
                         <span className="text-sm font-bold text-rose-500">
                           {formatCurrency((selectedTransaction.totalAmount || (selectedTransaction.amount * selectedTransaction.installmentsCount)) - (selectedTransaction.amount * (selectedTransaction.installmentIndex || 1)))}
                         </span>
@@ -2256,19 +2657,209 @@ export default function App() {
                   )}
 
                   {selectedTransaction.cardId && (
-                    <div className="flex justify-between items-center py-4 border-b border-slate-800/50">
-                      <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Cartão</span>
+                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Cartão</span>
                       <span className="text-sm font-bold">{cards.find(c => c.id === selectedTransaction.cardId)?.name || 'Desconhecido'}</span>
+                    </div>
+                  )}
+
+                  {selectedTransaction.location && (
+                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50 cursor-pointer hover:bg-white/5 transition-colors px-1 -mx-1 rounded-lg"
+                      onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${selectedTransaction.location?.lat},${selectedTransaction.location?.lng}`, '_blank')}
+                    >
+                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Localização</span>
+                      <span className="text-sm font-bold text-slate-300 max-w-[150px] text-right truncate">{selectedTransaction.location.address}</span>
+                    </div>
+                  )}
+
+                  {selectedTransaction.category === 'Pix do Rolê' && (selectedTransaction.pixKey || settings.pixKey) && (
+                    <div className="mt-4 p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 space-y-3">
+                      <p className="text-[10px] text-slate-400 leading-relaxed italic text-center">
+                        "Galera, a conta deu {formatCurrency(selectedTransaction.amount)} pra cada. Meu Pix é {selectedTransaction.pixKey || settings.pixKey}"
+                      </p>
+                      <button 
+                        onClick={() => {
+                          const message = `Galera, a conta deu ${formatCurrency(selectedTransaction.amount)} pra cada. Meu Pix é ${selectedTransaction.pixKey || settings.pixKey}`;
+                          const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+                          window.open(url, '_blank');
+                        }}
+                        className="w-full py-3 bg-emerald-500 text-on-primary text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
+                      >
+                        <Share2 size={14} />
+                        Compartilhar Pix
+                      </button>
                     </div>
                   )}
                 </div>
 
-                <button 
-                  onClick={() => setSelectedTransaction(null)}
-                  className="w-full bg-[#0F111A] text-white font-bold py-4 rounded-2xl border border-slate-800 hover:bg-[#151825] transition-colors"
-                >
-                  Fechar
-                </button>
+                <div className="flex flex-col gap-3">
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => setSelectedTransaction(null)}
+                      className="flex-1 bg-[#0F111A] text-white font-bold py-4 rounded-2xl border border-slate-800 hover:bg-[#151825] transition-colors"
+                    >
+                      Fechar
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setEditingTransaction(selectedTransaction);
+                        setSelectedTransaction(null);
+                      }}
+                      className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
+                    >
+                      Editar
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Edit Transaction Modal */}
+        <AnimatePresence>
+          {editingTransaction && (
+            <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                onClick={() => setEditingTransaction(null)} 
+                className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
+              />
+              <motion.div 
+                initial={{ y: 100, opacity: 0 }} 
+                animate={{ y: 0, opacity: 1 }} 
+                exit={{ y: 100, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-t-[40px] sm:rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
+              >
+                <h3 className="text-xl font-black mb-6">Editar Transação</h3>
+                <div className="space-y-4 mb-8">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Título</label>
+                    <input 
+                      type="text" 
+                      value={editingTransaction.title}
+                      onChange={(e) => setEditingTransaction({ ...editingTransaction, title: e.target.value })}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Valor</label>
+                    <MoneyInput 
+                      value={editingTransaction.amount}
+                      onChange={(val) => setEditingTransaction({ ...editingTransaction, amount: val })}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setEditingTransaction(null)}
+                    className="flex-1 bg-slate-800 text-white font-bold py-4 rounded-2xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={() => {
+                      updateTransaction(editingTransaction.id, { 
+                        title: editingTransaction.title, 
+                        amount: editingTransaction.amount 
+                      });
+                      setEditingTransaction(null);
+                    }}
+                    className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
+                  >
+                    Salvar
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Edit Card Modal */}
+        <AnimatePresence>
+          {editingCard && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                onClick={() => setEditingCard(null)} 
+                className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
+              />
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }} 
+                animate={{ scale: 1, opacity: 1 }} 
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-sm rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
+              >
+                <h3 className="text-xl font-black mb-6">Editar Cartão</h3>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  updateCard(editingCard.id, {
+                    name: formData.get('name') as string,
+                    limit: parseFloat(formData.get('limit') as string),
+                    dueDay: parseInt(formData.get('dueDay') as string),
+                    color: formData.get('color') as string
+                  });
+                }} className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Nome do Cartão</label>
+                    <input 
+                      name="name"
+                      type="text" 
+                      defaultValue={editingCard.name}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Limite</label>
+                    <input 
+                      name="limit"
+                      type="number" 
+                      defaultValue={editingCard.limit}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Dia do Vencimento</label>
+                    <select 
+                      name="dueDay"
+                      defaultValue={editingCard.dueDay}
+                      className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                    >
+                      {[...Array(31)].map((_, i) => (
+                        <option key={i+1} value={i+1}>{i+1}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {CARD_COLORS.map(color => (
+                      <label key={color.value} className="relative cursor-pointer">
+                        <input type="radio" name="color" value={color.value} className="peer sr-only" defaultChecked={color.value === editingCard.color} />
+                        <div className={`h-12 rounded-xl ${color.value} border-4 border-transparent peer-checked:border-white shadow-sm`} />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                    <button 
+                      type="button"
+                      onClick={() => setEditingCard(null)}
+                      className="flex-1 bg-slate-800 text-white font-bold py-4 rounded-2xl"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
+                    >
+                      Salvar
+                    </button>
+                  </div>
+                </form>
               </motion.div>
             </div>
           )}

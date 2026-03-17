@@ -4,7 +4,7 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --color-primary: #cdfc54;
-  --color-on-primary: #000000;
+  --color-on-primary: #0f111a;
   --color-card-1: #6f12cc;
   --color-card-2: #e16e1d;
   --color-card-3: #487f61;
@@ -14,7 +14,7 @@
 }
 
 body {
-  background-color: #000000;
+  background-color: #0f111a;
   -webkit-tap-highlight-color: transparent;
 }
 

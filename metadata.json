@@ -1,5 +1,5 @@
 {
   "name": "Luko",
   "description": "APP de finanças pessoais minimalista focado em simplicidade e controle de gastos.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["geolocation"]
 }
