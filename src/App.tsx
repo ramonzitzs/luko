@@ -552,10 +552,11 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         setLoading(true); // Ensure loading is true if we are fetching
         setPrediction(''); // Clear prediction while fetching new one
 
-        const apiKey = (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) 
-          ? process.env.GEMINI_API_KEY 
-          : (import.meta.env.VITE_GEMINI_API_KEY || process.env.API_KEY || '');
-        const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+          throw new Error('GEMINI_API_KEY not found');
+        }
+        const ai = new GoogleGenAI({ apiKey });
         
         const totalIncome = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
         const totalExpenses = transactions
@@ -714,7 +715,8 @@ export default function App() {
             monthlyLimit: 0,
             emailNotifications: false,
             pushNotifications: true,
-            readNotificationIds: []
+            readNotificationIds: [],
+            biometricsEnabled: false
           });
         }
       }
@@ -1185,10 +1187,20 @@ export default function App() {
     }).map(t => {
       const tDate = new Date(t.date);
       tDate.setHours(0, 0, 0, 0);
+      
+      let dueLabel = '';
+      const diffDays = Math.ceil((tDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) dueLabel = 'Atrasada';
+      else if (diffDays === 0) dueLabel = 'Vence hoje';
+      else if (diffDays === 1) dueLabel = 'Vence amanhã';
+      else dueLabel = tDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+
       return {
         ...t,
         isCardBill: false,
-        isOverdue: tDate < today
+        isOverdue: tDate < today,
+        dueLabel
       };
     });
 
@@ -1213,9 +1225,17 @@ export default function App() {
       return unpaid.length > 0;
     }).map(card => {
       const dueDateThisMonth = new Date(currentYear, currentMonth, card.dueDay!);
-      dueDateThisMonth.setHours(23, 59, 59, 999);
+      dueDateThisMonth.setHours(0, 0, 0, 0);
       const isOverdue = dueDateThisMonth < today;
       
+      let dueLabel = '';
+      const diffDays = Math.ceil((dueDateThisMonth.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) dueLabel = 'Atrasada';
+      else if (diffDays === 0) dueLabel = 'Vence hoje';
+      else if (diffDays === 1) dueLabel = 'Vence amanhã';
+      else dueLabel = dueDateThisMonth.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+
       const unpaid = transactions.filter(t => 
         t.cardId === card.id && 
         t.type === 'expense' && 
@@ -1232,7 +1252,8 @@ export default function App() {
         category: 'Cartão',
         isCardBill: true,
         date: dueDateThisMonth,
-        isOverdue
+        isOverdue,
+        dueLabel
       };
     });
 
@@ -1401,7 +1422,23 @@ export default function App() {
     }
   }, [notifications.length]);
 
+  const [isBiometricAuthenticated, setIsBiometricAuthenticated] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
+
+  const handleBiometricAuth = async () => {
+    // In a real PWA, we would use WebAuthn here.
+    // For this environment, we'll simulate the successful biometric check
+    // after a small delay to give the "bank app" feel.
+    setTimeout(() => {
+      setIsBiometricAuthenticated(true);
+    }, 500);
+  };
+
+  useEffect(() => {
+    if (settings.biometricsEnabled && !isBiometricAuthenticated && !showSplash && user) {
+      handleBiometricAuth();
+    }
+  }, [settings.biometricsEnabled, isBiometricAuthenticated, showSplash, user]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1469,7 +1506,32 @@ export default function App() {
   };
 
   const renderContent = () => {
-    if (!user) {
+    if (settings.biometricsEnabled && !isBiometricAuthenticated && !showSplash && user) {
+    return (
+      <div className="min-h-screen bg-[#0F111A] flex flex-col items-center justify-center p-8 text-center">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center"
+        >
+          <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
+            <Fingerprint size={40} className="text-primary" />
+          </div>
+          <h2 className="text-2xl font-black mb-2">App Bloqueado</h2>
+          <p className="text-slate-500 mb-8">Use a biometria para acessar sua conta Luko</p>
+          <button 
+            onClick={handleBiometricAuth}
+            className="bg-primary text-[#0F111A] font-black px-8 py-4 rounded-2xl flex items-center gap-3 active:scale-95 transition-transform"
+          >
+            <Fingerprint size={20} />
+            Desbloquear
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!user) {
       return (
         <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
           <motion.div 
@@ -1777,8 +1839,7 @@ export default function App() {
                               initial={{ opacity: 0, scale: 0.95 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.9, x: -20 }}
-                              onClick={() => setSelectedTransaction(t as any)}
-                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-[#1C1F2B] border-slate-800/50'} border rounded-[20px] p-4 flex items-center justify-between cursor-pointer active:scale-[0.98] transition-transform`}
+                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-[#1C1F2B] border-slate-800/50'} border rounded-[20px] p-4 flex items-center justify-between active:scale-[0.98] transition-transform`}
                             >
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <div className={`w-10 h-10 flex-shrink-0 ${t.isOverdue ? 'bg-rose-500/20 text-rose-500' : 'bg-slate-800 text-slate-400'} rounded-xl flex items-center justify-center`}>
@@ -1787,7 +1848,10 @@ export default function App() {
                                 <div className="min-w-0 flex-1">
                                   <p className={`text-sm font-bold truncate pr-2 ${t.isOverdue ? 'text-rose-500' : 'text-white'}`}>{t.title}</p>
                                   <p className={`text-[10px] ${t.isOverdue ? 'text-rose-500/60' : 'text-slate-500'} font-bold uppercase tracking-widest truncate`}>
-                                    {t.category} {t.isOverdue && '• ATRASADO'}
+                                    {t.category}
+                                  </p>
+                                  <p className={`text-[10px] font-bold ${t.isOverdue ? 'text-rose-500' : 'text-slate-500'} mt-0.5`}>
+                                    {(t as any).dueLabel}
                                   </p>
                                 </div>
                               </div>
@@ -2738,7 +2802,7 @@ export default function App() {
         {/* Transaction Detail Modal */}
         <AnimatePresence>
           {selectedTransaction && (
-            <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-4">
+            <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center">
               <motion.div 
                 initial={{ opacity: 0 }} 
                 animate={{ opacity: 1 }} 
@@ -2747,10 +2811,10 @@ export default function App() {
                 className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
               />
               <motion.div 
-                initial={{ y: 100, opacity: 0 }} 
+                initial={{ y: "100%", opacity: 0 }} 
                 animate={{ y: 0, opacity: 1 }} 
-                exit={{ y: 100, opacity: 0 }}
-                className="bg-[#1C1F2B] w-full max-w-sm rounded-t-[40px] sm:rounded-[40px] p-6 relative z-10 shadow-2xl border border-slate-800"
+                exit={{ y: "100%", opacity: 0 }}
+                className="bg-[#1C1F2B] w-full sm:max-w-md rounded-t-[40px] sm:rounded-[40px] p-6 pb-10 relative z-10 shadow-2xl border-t border-x border-slate-800 sm:border"
               >
                 <div className="w-12 h-1 bg-slate-800 rounded-full mx-auto mb-6 sm:hidden" />
                 
