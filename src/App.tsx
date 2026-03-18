@@ -530,18 +530,18 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
     const generatePrediction = async () => {
       try {
         const now = new Date().getTime();
-        const cachedTime = localStorage.getItem('oracle_cache_time_v2');
+        const cachedTime = localStorage.getItem('luko_oracle_time_v3');
         
-        // If cache is expired, clear both AI caches to force a synchronized update
+        // If cache is expired (8 hours), clear it
         if (cachedTime && (now - parseInt(cachedTime)) >= 8 * 60 * 60 * 1000) {
-          localStorage.removeItem('oracle_insight_v2');
-          localStorage.removeItem('lukinho_sincero_v2');
-          setPrediction(''); // Clear current prediction to avoid showing old one
+          localStorage.removeItem('luko_prediction_v3');
+          localStorage.removeItem('luko_oracle_time_v3');
+          setPrediction('');
           setLoading(true);
         }
 
-        const cached = localStorage.getItem('lukinho_sincero_v2');
-        const currentCachedTime = localStorage.getItem('oracle_cache_time_v2');
+        const cached = localStorage.getItem('luko_prediction_v3');
+        const currentCachedTime = localStorage.getItem('luko_oracle_time_v3');
         
         if (cached && currentCachedTime && (now - parseInt(currentCachedTime)) < 8 * 60 * 60 * 1000) {
           setPrediction(cached);
@@ -549,20 +549,36 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
           return;
         }
 
-        setLoading(true); // Ensure loading is true if we are fetching
-        setPrediction(''); // Clear prediction while fetching new one
+        setLoading(true);
+        setPrediction('');
 
+        // Accessing API Key - Vite will replace this string during build
         const apiKey = process.env.GEMINI_API_KEY;
+        
         if (!apiKey) {
-          throw new Error('GEMINI_API_KEY not found');
+          console.error('Lukinho Error: GEMINI_API_KEY is missing. Ensure it is set in the environment.');
+          setPrediction('Lukinho está de folga. Verifique a chave da API.');
+          setLoading(false);
+          return;
         }
+
         const ai = new GoogleGenAI({ apiKey });
         
-        const totalIncome = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
+        const now_date = new Date();
+        const currentMonth = now_date.getMonth();
+        const currentYear = now_date.getFullYear();
+
+        const totalIncome = settings.incomes.reduce((acc, curr) => acc + (Number(curr.value) || 0), 0);
         const totalExpenses = transactions
-          .filter(t => t.type === 'expense' && new Date(t.date).getMonth() === new Date().getMonth())
-          .reduce((acc, curr) => acc + curr.amount, 0);
-        const limit = settings.monthlyLimit || totalIncome;
+          .filter(t => {
+            const tDate = new Date(t.date);
+            return t.type === 'expense' && 
+                   tDate.getMonth() === currentMonth && 
+                   tDate.getFullYear() === currentYear;
+          })
+          .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+        
+        const limit = Number(settings.monthlyLimit) || totalIncome;
         const balance = totalIncome - totalExpenses;
         
         const response = await ai.models.generateContent({
@@ -577,18 +593,18 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         
         const newPrediction = response.text || 'Lukinho está sem palavras para sua conta bancária.';
         setPrediction(newPrediction);
-        localStorage.setItem('lukinho_sincero_v2', newPrediction);
-        localStorage.setItem('oracle_cache_time_v2', now.toString());
+        localStorage.setItem('luko_prediction_v3', newPrediction);
+        localStorage.setItem('luko_oracle_time_v3', now.toString());
       } catch (error) {
-        console.error('Error generating prediction:', error);
-        setPrediction('Lukinho está calculando seu futuro financeiro...');
+        console.error('Lukinho Error:', error);
+        setPrediction('Lukinho está sem sinal. Tente novamente mais tarde.');
       } finally {
         setLoading(false);
       }
     };
 
     generatePrediction();
-  }, [transactions.length, settings.monthlyLimit]);
+  }, [transactions.length, settings.monthlyLimit, settings.incomes.length]);
 
   return (
     <motion.div 
