@@ -496,9 +496,9 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
           <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
             {t.type === 'income' ? '+' : '-'} {privacyMode ? '••••••' : formatCurrency(t.amount)}
           </p>
-          <p className="text-[10px] font-bold text-slate-500 mt-0.5">
-            {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) : ''}
-          </p>
+            <p className="text-[10px] font-bold text-slate-500 mt-0.5">
+              {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : ''}
+            </p>
         </div>
       </motion.div>
     </div>
@@ -536,6 +536,8 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         if (cachedTime && (now - parseInt(cachedTime)) >= 8 * 60 * 60 * 1000) {
           localStorage.removeItem('oracle_insight_v2');
           localStorage.removeItem('lukinho_sincero_v2');
+          setPrediction(''); // Clear current prediction to avoid showing old one
+          setLoading(true);
         }
 
         const cached = localStorage.getItem('lukinho_sincero_v2');
@@ -547,7 +549,12 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
           return;
         }
 
-        const apiKey = (typeof process !== 'undefined' && process.env) ? process.env.GEMINI_API_KEY : '';
+        setLoading(true); // Ensure loading is true if we are fetching
+        setPrediction(''); // Clear prediction while fetching new one
+
+        const apiKey = (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) 
+          ? process.env.GEMINI_API_KEY 
+          : (import.meta.env.VITE_GEMINI_API_KEY || process.env.API_KEY || '');
         const ai = new GoogleGenAI({ apiKey: apiKey || '' });
         
         const totalIncome = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
@@ -693,6 +700,7 @@ export default function App() {
       setUser(user);
       setIsAuthReady(true);
       if (user) {
+        setActiveTab('dashboard');
         // Ensure user doc exists
         const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
@@ -781,6 +789,7 @@ export default function App() {
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
+      setActiveTab('dashboard');
     } catch (error) {
       console.error('Login error:', error);
     }
@@ -975,28 +984,25 @@ export default function App() {
     try {
       const t = transactions.find(item => item.id === id);
       
-      // If title is changing and it's part of a group (installments/recurring)
-      if (data.title && t?.parentTransactionId) {
+      // If it's part of a group (installments/recurring)
+      if (t?.parentTransactionId) {
         const relatedTransactions = transactions.filter(item => 
-          item.parentTransactionId === t.parentTransactionId && item.id !== id
+          item.parentTransactionId === t.parentTransactionId
         );
         
-        // Update the current one
-        await updateDoc(doc(db, 'transactions', id), data);
-        
-        // Update related ones
-        for (const related of relatedTransactions) {
-          let newTitle = data.title;
+        // Update all related ones with the same data (except title which might have index)
+        const batch = relatedTransactions.map(related => {
+          let updateData = { ...data };
           
-          // If it's an installment, preserve the (i/n) part
-          if (related.installmentIndex && related.installmentsCount) {
-            // Remove any existing (i/n) from the new title if the user accidentally included it
+          if (data.title && related.installmentIndex && related.installmentsCount) {
             const cleanTitle = data.title.replace(/\s\(\d+\/\d+\)$/, '');
-            newTitle = `${cleanTitle} (${related.installmentIndex}/${related.installmentsCount})`;
+            updateData.title = `${cleanTitle} (${related.installmentIndex}/${related.installmentsCount})`;
           }
           
-          await updateDoc(doc(db, 'transactions', related.id), { title: newTitle });
-        }
+          return updateDoc(doc(db, 'transactions', related.id), updateData);
+        });
+        
+        await Promise.all(batch);
       } else {
         await updateDoc(doc(db, 'transactions', id), data);
       }
@@ -1119,6 +1125,7 @@ export default function App() {
   const filteredTransactions = useMemo(() => {
     const currentMonth = selectedMonth.getMonth();
     const currentYear = selectedMonth.getFullYear();
+    const now = new Date();
 
     return transactions.filter(t => {
       const tDate = new Date(t.date);
@@ -1128,7 +1135,10 @@ export default function App() {
       const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
-      return isSameMonth || (isRecurring && isFutureOrCurrent);
+      // Filter out future transactions for "Recent Transactions" view
+      const isNotFuture = tDate <= now;
+      
+      return (isSameMonth || (isRecurring && isFutureOrCurrent)) && isNotFuture;
     });
   }, [transactions, selectedMonth]);
 
@@ -1187,7 +1197,7 @@ export default function App() {
       if (!card.dueDay) return false;
       
       const dueDateThisMonth = new Date(currentYear, currentMonth, card.dueDay);
-      dueDateThisMonth.setHours(0, 0, 0, 0);
+      dueDateThisMonth.setHours(23, 59, 59, 999); // End of day
 
       const isDueThisWeekOrPast = dueDateThisMonth < endOfWeek;
       
@@ -1197,20 +1207,20 @@ export default function App() {
         t.cardId === card.id && 
         t.type === 'expense' && 
         !t.isPaid &&
-        (new Date(t.date) <= dueDateThisMonth)
+        (new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear)
       );
       
       return unpaid.length > 0;
     }).map(card => {
       const dueDateThisMonth = new Date(currentYear, currentMonth, card.dueDay!);
-      dueDateThisMonth.setHours(0, 0, 0, 0);
+      dueDateThisMonth.setHours(23, 59, 59, 999);
       const isOverdue = dueDateThisMonth < today;
       
       const unpaid = transactions.filter(t => 
         t.cardId === card.id && 
         t.type === 'expense' && 
         !t.isPaid &&
-        (new Date(t.date) <= dueDateThisMonth)
+        (new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear)
       );
       const amount = unpaid.reduce((acc, t) => acc + t.amount, 0);
 
@@ -1391,6 +1401,57 @@ export default function App() {
     }
   }, [notifications.length]);
 
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 3500); // Duration of the splash screen
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (showSplash) {
+    return (
+      <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 1.1 }}
+          className="relative z-10"
+        >
+          <div className="w-48 h-48 flex items-center justify-center mx-auto mb-10 overflow-hidden">
+            <motion.img 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1, ease: "easeOut" }}
+              src="https://lh3.googleusercontent.com/d/1caF8UPYKEXFJ0qyEmPhO92-KTi4JnpdP" 
+              className="w-full h-auto object-contain"
+              referrerPolicy="no-referrer"
+              onLoad={() => {
+                setTimeout(() => setShowSplash(false), 3000);
+              }}
+              onError={() => {
+                console.error("Splash logo failed to load");
+                setShowSplash(false);
+              }}
+              alt="Luko Logo"
+            />
+          </div>
+          <div className="mt-8 flex justify-center gap-2">
+            {[0, 1, 2].map(i => (
+              <motion.div 
+                key={i}
+                animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
+                transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                className="w-2 h-2 bg-[#0F111A] rounded-full"
+              />
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   if (!isAuthReady) {
     return (
       <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
@@ -1399,27 +1460,49 @@ export default function App() {
     );
   }
 
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setOpenedAccordion(null);
+    if (tab === 'history') {
+      setSelectedHistoryCategory('Todas');
+    }
+  };
+
   const renderContent = () => {
     if (!user) {
       return (
-        <div className="min-h-screen bg-[#0F111A] flex flex-col items-center justify-center p-6 text-center text-white">
+        <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
           <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="max-w-sm w-full"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="max-w-sm w-full relative z-10"
           >
-            <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center mx-auto mb-8 shadow-xl shadow-primary/20">
-              <Wallet className="text-on-primary" size={40} />
+            <div className="mb-16">
+               <img 
+                 src="https://lh3.googleusercontent.com/d/1caF8UPYKEXFJ0qyEmPhO92-KTi4JnpdP" 
+                 className="w-32 h-auto" 
+                 referrerPolicy="no-referrer"
+                 alt="Luko Logo" 
+               />
             </div>
-            <h1 className="text-3xl font-bold mb-4 tracking-tight">Luko.</h1>
-            <p className="text-slate-400 mb-12">Controle suas finanças de forma minimalista e sem atrito.</p>
-            <button 
-              onClick={handleLogin}
-              className="w-full bg-[#1C1F2B] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 shadow-sm border border-slate-800 hover:bg-[#252936] transition-colors"
-            >
-              <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-              Entrar com Google
-            </button>
+            
+            <div className="space-y-1 mb-24 font-poppins font-light">
+              <p className="text-[#0F111A] text-4xl leading-[1.3] tracking-tight">Gastou,</p>
+              <p className="text-[#0F111A] text-4xl leading-[1.3] tracking-tight">anotou,</p>
+              <p className="text-[#0F111A] text-4xl leading-[1.3] tracking-tight">controlou.</p>
+              <p className="text-[#0F111A] text-4xl leading-[1.3] tracking-tight">Simples assim.</p>
+            </div>
+
+            <div className="space-y-6">
+              <button 
+                onClick={handleLogin}
+                className="w-full bg-[#0F111A] text-white font-black py-5 rounded-[24px] flex items-center justify-center gap-4 shadow-xl shadow-black/10 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              >
+                <img src="https://www.google.com/favicon.ico" className="w-6 h-6" alt="Google" />
+                Entrar com Google
+              </button>
+            </div>
           </motion.div>
         </div>
       );
@@ -1458,6 +1541,7 @@ export default function App() {
               <button 
                 onClick={() => {
                   setIsNotificationOpen(true);
+                  setNotificationsRead(true);
                   if (notifications.length > 0) {
                     const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), ...notifications.map(n => n.id)]));
                     updateSettings({ readNotificationIds: newReadIds });
@@ -1489,22 +1573,60 @@ export default function App() {
                     <h2 className="text-xl font-bold">Detalhes do Cartão</h2>
                   </div>
                   
-                  {cards.find(c => c.id === selectedCardId) && (
-                    <div className={`${cards.find(c => c.id === selectedCardId)?.color} rounded-[28px] p-6 text-white shadow-lg relative overflow-hidden`}>
-                      <div className="relative z-10">
-                        <CreditCard className="opacity-80 mb-4" size={24} />
-                        <p className="text-[10px] opacity-50 mb-1 uppercase tracking-widest font-bold">{cards.find(c => c.id === selectedCardId)?.name}</p>
-                        <p className="text-2xl font-bold mb-6">
-                          {formatCurrency((cards.find(c => c.id === selectedCardId)?.limit || 0) - (cards.find(c => c.id === selectedCardId)?.currentSpend || 0))}
-                        </p>
-                        <div className="space-y-2">
-                          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full bg-white" style={{ width: `${Math.min(100, ((cards.find(c => c.id === selectedCardId)?.currentSpend || 0) / (cards.find(c => c.id === selectedCardId)?.limit || 1)) * 100)}%` }} />
+                  {cards.find(c => c.id === selectedCardId) && (() => {
+                    const card = cards.find(c => c.id === selectedCardId)!;
+                    const cardSpend = transactions
+                      .filter(t => {
+                        const tDate = new Date(t.date);
+                        return t.cardId === card.id && 
+                               t.type === 'expense' && 
+                               tDate.getMonth() === selectedMonth.getMonth() && 
+                               tDate.getFullYear() === selectedMonth.getFullYear();
+                      })
+                      .reduce((acc, t) => acc + t.amount, 0);
+
+                    return (
+                      <div className={`${card.color === 'bg-slate-800' ? 'bg-[#1C1F2B] border border-slate-800' : card.color} rounded-[32px] p-8 text-white shadow-lg relative overflow-hidden min-h-[200px] flex flex-col justify-between`}>
+                        <div className="relative z-10 h-full flex flex-col justify-between">
+                          <div className="flex justify-between items-start mb-8">
+                            <CreditCard className="opacity-80" size={28} />
+                            {card.dueDay && (
+                              <div className="bg-black/20 backdrop-blur-md px-4 py-1.5 rounded-full">
+                                <p className="text-[10px] font-black uppercase tracking-widest">Vence dia {card.dueDay}</p>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="space-y-1 mb-6">
+                            <p className="text-[10px] opacity-60 uppercase tracking-widest font-black">{card.name}</p>
+                            <div className="flex justify-between items-end gap-2">
+                              <p className="text-3xl font-black tracking-tight">
+                                {settings.privacyMode ? '••••••' : formatCurrency(cardSpend)}
+                              </p>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-[10px] opacity-60 uppercase tracking-widest font-black mb-0.5 leading-none">Limite</p>
+                                <p className="text-sm font-bold opacity-90 whitespace-nowrap">
+                                  {settings.privacyMode ? '••••••' : formatCurrency(card.limit - card.currentSpend)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(100, (card.currentSpend / card.limit) * 100)}%` }}
+                              className="h-full bg-white rounded-full"
+                            />
                           </div>
                         </div>
+                        
+                        {/* Decorative circles */}
+                        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/5 rounded-full blur-3xl" />
+                        <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-white/5 rounded-full blur-3xl" />
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   <section>
                     <h3 className="font-bold text-lg mb-4">Transações no Cartão</h3>
@@ -1524,7 +1646,13 @@ export default function App() {
                                    tDate.getMonth() === selectedMonth.getMonth() && 
                                    tDate.getFullYear() === selectedMonth.getFullYear();
                           }).map(t => (
-                            <TransactionItem key={t.id} t={t} deleteTransaction={deleteTransaction} privacyMode={settings.privacyMode} />
+                            <TransactionItem 
+                              key={t.id} 
+                              t={t} 
+                              deleteTransaction={deleteTransaction} 
+                              privacyMode={settings.privacyMode} 
+                              onClick={() => setSelectedTransaction(t)}
+                            />
                           ))}
                         </AnimatePresence>
                       )}
@@ -1649,11 +1777,12 @@ export default function App() {
                               initial={{ opacity: 0, scale: 0.95 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.9, x: -20 }}
-                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-slate-800/40 border-slate-800/50'} border rounded-2xl p-4 flex items-center justify-between`}
+                              onClick={() => setSelectedTransaction(t as any)}
+                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-[#1C1F2B] border-slate-800/50'} border rounded-[20px] p-4 flex items-center justify-between cursor-pointer active:scale-[0.98] transition-transform`}
                             >
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <div className={`w-10 h-10 flex-shrink-0 ${t.isOverdue ? 'bg-rose-500/20 text-rose-500' : 'bg-slate-800 text-slate-400'} rounded-xl flex items-center justify-center`}>
-                                  {CATEGORIES[t.category]?.icon || <MoreHorizontal size={18} />}
+                                  {getInteractiveIcon(t.title, t.category)}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <p className={`text-sm font-bold truncate pr-2 ${t.isOverdue ? 'text-rose-500' : 'text-white'}`}>{t.title}</p>
@@ -1719,7 +1848,10 @@ export default function App() {
                   className="bg-[#1C1F2B] text-xs font-bold p-2 rounded-xl border border-slate-800 outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value="Todas">Todas Categorias</option>
-                  {Object.keys(CATEGORIES).map(cat => (
+                  {Object.keys(CATEGORIES).filter(cat => {
+                    // Only show categories that have transactions in the current month
+                    return extratoTransactions.some(t => t.category === cat);
+                  }).map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
@@ -1801,7 +1933,7 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0 }} 
               animate={{ opacity: 1 }} 
-              className="p-6 pb-4 max-w-md mx-auto"
+              className="pb-4 max-w-md mx-auto"
               onViewportEnter={() => {
                 localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
               }}
@@ -1868,7 +2000,7 @@ export default function App() {
                               setSelectedHistoryCategory(item.name);
                               setActiveTab('history');
                             }}
-                            className="flex items-center justify-between p-4 bg-[#1C1F2B] rounded-2xl border border-slate-800/50 active:scale-[0.98] transition-transform cursor-pointer"
+                            className="flex items-center justify-between p-4 bg-[#1C1F2B] rounded-[20px] border border-slate-800/50 active:scale-[0.98] transition-transform cursor-pointer"
                           >
                             <div className="flex items-center gap-4">
                               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${CATEGORIES[item.name]?.color || 'bg-slate-800 text-slate-400'}`}>
@@ -2261,14 +2393,11 @@ export default function App() {
           <div className="max-w-md mx-auto flex justify-between items-center relative">
             <NavButton 
               active={activeTab === 'dashboard'} 
-              onClick={() => {
-                setActiveTab('dashboard');
-                setSelectedCardId(null);
-              }} 
+              onClick={() => handleTabChange('dashboard')} 
               icon={<LayoutDashboard size={20} />} 
               label="Início" 
             />
-            <NavButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={20} />} label="Extrato" />
+            <NavButton active={activeTab === 'history'} onClick={() => handleTabChange('history')} icon={<History size={20} />} label="Extrato" />
             <div className="absolute left-1/2 -translate-x-1/2 -top-8">
               <button onClick={() => setIsModalOpen(true)} className="w-14 h-14 bg-primary text-on-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/20">
                 <Plus size={28} strokeWidth={3} />
@@ -2277,14 +2406,11 @@ export default function App() {
             <div className="w-12" />
             <NavButton 
               active={activeTab === 'goals'} 
-              onClick={() => {
-                setActiveTab('goals');
-                localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
-              }} 
+              onClick={() => handleTabChange('goals')} 
               icon={<Sparkles size={20} />} 
               label="Lukinho" 
             />
-            <NavButton active={activeTab === 'more'} onClick={() => setActiveTab('more')} icon={<SettingsIcon size={20} />} label="Ajustes" />
+            <NavButton active={activeTab === 'more'} onClick={() => handleTabChange('more')} icon={<SettingsIcon size={20} />} label="Ajustes" />
           </div>
         </nav>
 
@@ -2304,16 +2430,19 @@ export default function App() {
                   const formData = new FormData(form);
                   
                   const category = formData.get('category') as string;
-                  const installmentsCount = category === 'Parcela' ? parseInt(formData.get('installmentsCount') as string) || 1 : undefined;
-                  const peopleCount = category === 'Pix do Rolê' ? parseInt(formData.get('peopleCount') as string) || 1 : undefined;
+                  const customCategory = formData.get('customCategory') as string;
+                  const finalCategory = category === 'Outros' && customCategory ? customCategory : category;
+                  
+                  const installmentsCount = finalCategory === 'Parcela' ? parseInt(formData.get('installmentsCount') as string) || 1 : undefined;
+                  const peopleCount = finalCategory === 'Pix do Rolê' ? parseInt(formData.get('peopleCount') as string) || 1 : undefined;
                   const cardId = formData.get('cardId') as string || undefined;
-                  const dueDay = cardId ? undefined : ((category === 'Parcela' || category === 'Mensalidade' || category === 'Assinatura') ? parseInt(formData.get('dueDay') as string) || undefined : undefined);
+                  const dueDay = cardId ? undefined : ((finalCategory === 'Parcela' || finalCategory === 'Mensalidade' || finalCategory === 'Assinatura') ? parseInt(formData.get('dueDay') as string) || undefined : undefined);
                   
                   await addTransaction({
                     title: formData.get('title') as string,
                     amount: parseCurrencyInput(formData.get('amount') as string),
                     type: 'expense',
-                    category: category,
+                    category: finalCategory,
                     cardId: cardId,
                     installmentsCount: installmentsCount,
                     dueDay: dueDay,
@@ -2347,6 +2476,15 @@ export default function App() {
                       .filter(cat => cat !== 'Pix do Rolê' || settings.pixKey)
                       .map(cat => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
+
+                  {newTransCategory === 'Outros' && (
+                    <input 
+                      name="customCategory" 
+                      required 
+                      className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" 
+                      placeholder="Nome da nova categoria" 
+                    />
+                  )}
 
                   {newTransCategory === 'Pix do Rolê' && (
                     <div className="w-full">
@@ -2464,7 +2602,7 @@ export default function App() {
                     name: formData.get('name') as string,
                     limit: parseCurrencyInput(formData.get('limit') as string),
                     color: formData.get('color') as string,
-                    dueDay: parseInt(formData.get('dueDay') as string) || undefined,
+                    dueDay: (formData.get('dueDay') && formData.get('dueDay') !== "") ? parseInt(formData.get('dueDay') as string) : undefined,
                   });
                 }} className="space-y-4">
                   <input name="name" required className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" placeholder="Nome do Cartão (ex: Nubank)" />
@@ -2535,7 +2673,7 @@ export default function App() {
         {/* Month Picker Modal */}
         <AnimatePresence>
           {isMonthPickerOpen && (
-            <div className="fixed inset-0 z-[60] flex items-start justify-center pt-20 px-4">
+            <div className="fixed inset-0 z-[60] flex items-start justify-center px-0">
               <motion.div 
                 initial={{ opacity: 0 }} 
                 animate={{ opacity: 1 }} 
@@ -2544,10 +2682,10 @@ export default function App() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm" 
               />
               <motion.div 
-                initial={{ y: -50, opacity: 0 }} 
+                initial={{ y: -100, opacity: 0 }} 
                 animate={{ y: 0, opacity: 1 }} 
-                exit={{ y: -50, opacity: 0 }}
-                className="bg-[#1C1F2B] w-full max-w-sm rounded-[32px] p-6 relative z-10 shadow-2xl border border-slate-800/50"
+                exit={{ y: -100, opacity: 0 }}
+                className="bg-[#1C1F2B] w-full max-w-md rounded-b-[32px] p-6 relative z-10 shadow-2xl border border-slate-800/50"
               >
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-lg">Selecionar Mês</h3>
@@ -2625,14 +2763,26 @@ export default function App() {
                 </div>
 
                 <div className="space-y-2 mb-6">
-                  <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                  <div 
+                    onClick={() => {
+                      setEditingTransaction(selectedTransaction);
+                      setSelectedTransaction(null);
+                    }}
+                    className="flex justify-between items-center py-2 border-b border-slate-800/50 cursor-pointer hover:bg-white/5 transition-colors px-1 -mx-1 rounded-lg"
+                  >
                     <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Valor</span>
                     <span className={`text-sm font-bold ${selectedTransaction.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
                       {formatCurrency(selectedTransaction.amount)}
                     </span>
                   </div>
                   
-                  <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                  <div 
+                    onClick={() => {
+                      setEditingTransaction(selectedTransaction);
+                      setSelectedTransaction(null);
+                    }}
+                    className="flex justify-between items-center py-2 border-b border-slate-800/50 cursor-pointer hover:bg-white/5 transition-colors px-1 -mx-1 rounded-lg"
+                  >
                     <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Data</span>
                     <span className="text-sm font-bold">{selectedTransaction.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
                   </div>
@@ -2693,23 +2843,12 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => setSelectedTransaction(null)}
-                      className="flex-1 bg-[#0F111A] text-white font-bold py-4 rounded-2xl border border-slate-800 hover:bg-[#151825] transition-colors"
-                    >
-                      Fechar
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setEditingTransaction(selectedTransaction);
-                        setSelectedTransaction(null);
-                      }}
-                      className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
-                    >
-                      Editar
-                    </button>
-                  </div>
+                  <button 
+                    onClick={() => setSelectedTransaction(null)}
+                    className="w-full bg-[#0F111A] text-white font-bold py-4 rounded-2xl border border-slate-800 hover:bg-[#151825] transition-colors"
+                  >
+                    Fechar
+                  </button>
                 </div>
               </motion.div>
             </div>
