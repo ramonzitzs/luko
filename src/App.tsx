@@ -45,7 +45,6 @@ import {
   PieChart as PieChartIcon,
   Users,
   Heart,
-  Mail,
   Share2,
   TrendingUp
 } from 'lucide-react';
@@ -123,9 +122,7 @@ interface IncomeSource {
 interface UserSettings {
   incomes: IncomeSource[];
   monthlyLimit: number;
-  emailNotifications?: boolean;
   pushNotifications?: boolean;
-  biometricsEnabled?: boolean;
   privacyMode?: boolean;
   readNotificationIds?: string[];
   familyId?: string;
@@ -523,46 +520,22 @@ const TypingText = ({ text }: { text: string }) => {
 };
 
 const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[], settings: UserSettings }) => {
-  const [prediction, setPrediction] = useState<string>('');
-  const [loading, setLoading] = useState(true);
+  const [prediction, setPrediction] = useState<string>(() => {
+    // Initial state from cache to avoid flicker if valid
+    const cached = localStorage.getItem('luko_prediction_v3');
+    const cachedTime = localStorage.getItem('luko_oracle_time_v3');
+    const now = new Date().getTime();
+    if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
+      return cached;
+    }
+    return '';
+  });
+  const [loading, setLoading] = useState(!prediction);
 
   useEffect(() => {
     const generatePrediction = async () => {
       try {
         const now = new Date().getTime();
-        const cachedTime = localStorage.getItem('luko_oracle_time_v3');
-        
-        // If cache is expired (8 hours), clear it
-        if (cachedTime && (now - parseInt(cachedTime)) >= 8 * 60 * 60 * 1000) {
-          localStorage.removeItem('luko_prediction_v3');
-          localStorage.removeItem('luko_oracle_time_v3');
-          setPrediction('');
-          setLoading(true);
-        }
-
-        const cached = localStorage.getItem('luko_prediction_v3');
-        const currentCachedTime = localStorage.getItem('luko_oracle_time_v3');
-        
-        if (cached && currentCachedTime && (now - parseInt(currentCachedTime)) < 8 * 60 * 60 * 1000) {
-          setPrediction(cached);
-          setLoading(false);
-          return;
-        }
-
-        setLoading(true);
-        setPrediction('');
-
-        // Accessing API Key - Vite will replace this string during build
-        const apiKey = process.env.GEMINI_API_KEY;
-        
-        if (!apiKey) {
-          console.error('Lukinho Error: GEMINI_API_KEY is missing. Ensure it is set in the environment.');
-          setPrediction('Lukinho está de folga. Verifique a chave da API.');
-          setLoading(false);
-          return;
-        }
-
-        const ai = new GoogleGenAI({ apiKey });
         
         const now_date = new Date();
         const currentMonth = now_date.getMonth();
@@ -580,6 +553,41 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         
         const limit = Number(settings.monthlyLimit) || totalIncome;
         const balance = totalIncome - totalExpenses;
+
+        // Create a signature of the current financial state
+        const currentSignature = `${totalIncome}-${totalExpenses}-${limit}`;
+        const cachedSignature = localStorage.getItem('luko_data_signature_v3');
+        const cachedTime = localStorage.getItem('luko_oracle_time_v3');
+        const cachedPrediction = localStorage.getItem('luko_prediction_v3');
+
+        // If we have a valid cache AND the data hasn't changed, don't re-fetch
+        if (
+          cachedPrediction && 
+          cachedSignature === currentSignature && 
+          cachedTime && 
+          (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000
+        ) {
+          setPrediction(cachedPrediction);
+          setLoading(false);
+          return;
+        }
+
+        // If data changed or cache expired, fetch new prediction
+        setLoading(true);
+        // Don't clear prediction immediately to avoid empty space, 
+        // TypingText will handle the transition when newPrediction arrives.
+
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+          const isVercel = window.location.hostname.includes('vercel.app');
+          setPrediction(isVercel 
+            ? 'Lukinho precisa da chave GEMINI_API_KEY configurada no Vercel.' 
+            : 'Lukinho está de folga. Verifique a chave da API nos Segredos.');
+          setLoading(false);
+          return;
+        }
+
+        const ai = new GoogleGenAI({ apiKey });
         
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
@@ -592,18 +600,25 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         });
         
         const newPrediction = response.text || 'Lukinho está sem palavras para sua conta bancária.';
+        
         setPrediction(newPrediction);
         localStorage.setItem('luko_prediction_v3', newPrediction);
         localStorage.setItem('luko_oracle_time_v3', now.toString());
+        localStorage.setItem('luko_data_signature_v3', currentSignature);
       } catch (error) {
         console.error('Lukinho Error:', error);
-        setPrediction('Lukinho está sem sinal. Tente novamente mais tarde.');
+        // Only show error if we don't have any prediction at all
+        if (!prediction) {
+          setPrediction('Lukinho está sem sinal. Tente novamente mais tarde.');
+        }
       } finally {
         setLoading(false);
       }
     };
 
-    generatePrediction();
+    // Small delay to wait for Firestore data to stabilize
+    const timeout = setTimeout(generatePrediction, 1000);
+    return () => clearTimeout(timeout);
   }, [transactions.length, settings.monthlyLimit, settings.incomes.length]);
 
   return (
@@ -617,12 +632,13 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lukinho Sincero</span>
       </div>
       
-      {loading ? (
+      {loading && !prediction ? (
         <div className="h-20 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
         </div>
       ) : (
         <motion.p 
+          key={prediction} // Force re-animation when prediction changes
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="text-3xl font-black text-primary leading-[1.4] tracking-tight"
@@ -646,15 +662,12 @@ export default function App() {
   const [settings, setSettings] = useState<UserSettings>({ 
     incomes: [], 
     monthlyLimit: 0, 
-    emailNotifications: false, 
     pushNotifications: true,
-    biometricsEnabled: false,
     privacyMode: false,
     readNotificationIds: [] 
   });
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-  const [notificationsRead, setNotificationsRead] = useState(true);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [openedAccordion, setOpenedAccordion] = useState<string | null>(null);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
@@ -729,10 +742,8 @@ export default function App() {
             photoURL: user.photoURL,
             incomes: [],
             monthlyLimit: 0,
-            emailNotifications: false,
             pushNotifications: true,
-            readNotificationIds: [],
-            biometricsEnabled: false
+            readNotificationIds: []
           });
         }
       }
@@ -750,9 +761,7 @@ export default function App() {
         setSettings({
           incomes: data.incomes || [],
           monthlyLimit: data.monthlyLimit || 0,
-          emailNotifications: data.emailNotifications || false,
           pushNotifications: data.pushNotifications ?? true,
-          biometricsEnabled: data.biometricsEnabled || false,
           privacyMode: data.privacyMode || false,
           readNotificationIds: data.readNotificationIds || [],
           familyId: data.familyId,
@@ -1280,21 +1289,6 @@ export default function App() {
     });
   }, [transactions, cards]);
 
-  // --- Email Notifications Effect ---
-  useEffect(() => {
-    if (settings.emailNotifications && user?.email && billsDueThisWeek.length > 0) {
-      const todayStr = new Date().toDateString();
-      const lastSent = localStorage.getItem(`email_sent_${user.uid}`);
-      
-      if (lastSent !== todayStr) {
-        console.log(`[Email Notification] Sending to ${user.email}: Você tem ${billsDueThisWeek.length} conta(s) para pagar esta semana.`);
-        // In a real app, this would call a backend service.
-        localStorage.setItem(`email_sent_${user.uid}`, todayStr);
-      }
-    }
-  }, [settings.emailNotifications, billsDueThisWeek.length, user]);
-
-
   const categoryData = useMemo(() => {
     const currentMonth = selectedMonth.getMonth();
     const currentYear = selectedMonth.getFullYear();
@@ -1349,6 +1343,7 @@ export default function App() {
     const list: Notification[] = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
 
@@ -1360,7 +1355,7 @@ export default function App() {
         
         if (tDate.getTime() === today.getTime()) {
           list.push({
-            id: `today-${t.id}`,
+            id: `today-${t.id}-${todayStr}`,
             title: 'Vencimento Hoje',
             message: `A conta "${t.title}" vence hoje!`,
             type: 'warning',
@@ -1368,8 +1363,9 @@ export default function App() {
             category: t.category
           });
         } else if (tDate.getTime() < today.getTime()) {
+          // Overdue notifications are "daily" - ID includes today's date
           list.push({
-            id: `overdue-${t.id}`,
+            id: `overdue-${t.id}-${todayStr}`,
             title: 'Conta Vencida',
             message: `A conta "${t.title}" está atrasada!`,
             type: 'warning',
@@ -1378,7 +1374,7 @@ export default function App() {
           });
         } else if (tDate.getTime() === tomorrow.getTime()) {
           list.push({
-            id: `tomorrow-${t.id}`,
+            id: `tomorrow-${t.id}-${todayStr}`,
             title: 'Vencimento Amanhã',
             message: `A conta "${t.title}" vence amanhã.`,
             type: 'info',
@@ -1394,7 +1390,7 @@ export default function App() {
       const usage = (c.currentSpend / c.limit) * 100;
       if (usage >= 90) {
         list.push({
-          id: `card-limit-${c.id}`,
+          id: `card-limit-${c.id}-${todayStr}`,
           title: 'Cartão no Limite',
           message: `O cartão ${c.name} atingiu ${Math.round(usage)}% do limite!`,
           type: 'warning',
@@ -1406,7 +1402,7 @@ export default function App() {
     // Check global limit
     if (stats.progress >= 90) {
       list.push({
-        id: 'global-limit',
+        id: `global-limit-${todayStr}`,
         title: 'Orçamento Crítico',
         message: `Você já utilizou ${Math.round(stats.progress)}% do seu orçamento mensal!`,
         type: 'warning',
@@ -1414,47 +1410,10 @@ export default function App() {
       });
     }
 
-    // Check Lukinho tab visit
-    const lastVisit = localStorage.getItem('lastLukinhoVisit');
-    const todayStr = new Date().toDateString();
-    if (lastVisit !== todayStr) {
-      list.push({
-        id: 'lukinho-visit',
-        title: 'Lukinho te chama!',
-        message: 'Ei! O Lukinho está com saudades. Vem ver como está sua vida financeira hoje! 🚀',
-        type: 'info',
-        date: new Date()
-      });
-    }
-
     return list.filter(n => !(settings.readNotificationIds || []).includes(n.id));
   }, [transactions, cards, stats, settings.readNotificationIds]);
 
-  useEffect(() => {
-    if (notifications.length > 0) {
-      setNotificationsRead(false);
-    } else {
-      setNotificationsRead(true);
-    }
-  }, [notifications.length]);
-
-  const [isBiometricAuthenticated, setIsBiometricAuthenticated] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
-
-  const handleBiometricAuth = async () => {
-    // In a real PWA, we would use WebAuthn here.
-    // For this environment, we'll simulate the successful biometric check
-    // after a small delay to give the "bank app" feel.
-    setTimeout(() => {
-      setIsBiometricAuthenticated(true);
-    }, 500);
-  };
-
-  useEffect(() => {
-    if (settings.biometricsEnabled && !isBiometricAuthenticated && !showSplash && user) {
-      handleBiometricAuth();
-    }
-  }, [settings.biometricsEnabled, isBiometricAuthenticated, showSplash, user]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1522,32 +1481,7 @@ export default function App() {
   };
 
   const renderContent = () => {
-    if (settings.biometricsEnabled && !isBiometricAuthenticated && !showSplash && user) {
-    return (
-      <div className="min-h-screen bg-[#0F111A] flex flex-col items-center justify-center p-8 text-center">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center"
-        >
-          <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
-            <Fingerprint size={40} className="text-primary" />
-          </div>
-          <h2 className="text-2xl font-black mb-2">App Bloqueado</h2>
-          <p className="text-slate-500 mb-8">Use a biometria para acessar sua conta Luko</p>
-          <button 
-            onClick={handleBiometricAuth}
-            className="bg-primary text-[#0F111A] font-black px-8 py-4 rounded-2xl flex items-center gap-3 active:scale-95 transition-transform"
-          >
-            <Fingerprint size={20} />
-            Desbloquear
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (!user) {
+    if (!user) {
       return (
         <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
           <motion.div 
@@ -1619,7 +1553,6 @@ export default function App() {
               <button 
                 onClick={() => {
                   setIsNotificationOpen(true);
-                  setNotificationsRead(true);
                   if (notifications.length > 0) {
                     const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), ...notifications.map(n => n.id)]));
                     updateSettings({ readNotificationIds: newReadIds });
@@ -1628,7 +1561,7 @@ export default function App() {
                 className="relative p-2 flex items-center justify-center"
               >
                 <Bell size={20} className={notifications.length > 0 ? "text-white" : "text-slate-400"} />
-                {notifications.length > 0 && !notificationsRead && (
+                {notifications.length > 0 && (
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#0F111A]" />
                 )}
               </button>
@@ -2338,77 +2271,6 @@ export default function App() {
                         />
                       </button>
                     </div>
-
-                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                          <Mail size={20} />
-                        </div>
-                        <div className="text-left">
-                          <p className="text-sm font-bold">Notificações por e-mail</p>
-                          <p className="text-[10px] text-slate-500">Alertas no dia do vencimento</p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => updateSettings({ emailNotifications: !settings.emailNotifications })}
-                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.emailNotifications ? 'bg-primary' : 'bg-slate-700'}`}
-                      >
-                        <motion.div 
-                          animate={{ x: settings.emailNotifications ? 26 : 4 }}
-                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.emailNotifications ? 'bg-[#0F111A]' : 'bg-white'}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion 
-                  title="Segurança" 
-                  icon={<Fingerprint size={20} />}
-                  isOpen={openedAccordion === 'security'}
-                  onToggle={() => setOpenedAccordion(openedAccordion === 'security' ? null : 'security')}
-                >
-                  <div className="space-y-4 text-left">
-                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                          <Fingerprint size={20} />
-                        </div>
-                        <div className="text-left">
-                          <p className="text-sm font-bold">Biometria</p>
-                          <p className="text-[10px] text-slate-500">Acessar app com digital/face</p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => updateSettings({ biometricsEnabled: !settings.biometricsEnabled })}
-                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.biometricsEnabled ? 'bg-primary' : 'bg-slate-700'}`}
-                      >
-                        <motion.div 
-                          animate={{ x: settings.biometricsEnabled ? 26 : 4 }}
-                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.biometricsEnabled ? 'bg-[#0F111A]' : 'bg-white'}`}
-                        />
-                      </button>
-                    </div>
-
-                    {deferredPrompt && (
-                      <div className="flex items-center justify-between p-4 bg-primary/10 rounded-2xl border border-primary/20">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center text-primary">
-                            <Download size={20} />
-                          </div>
-                          <div className="text-left">
-                            <p className="text-sm font-bold text-primary">Instalar App</p>
-                            <p className="text-[10px] text-primary/60">Tenha o Luko na sua tela inicial</p>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={handleInstallClick}
-                          className="bg-primary text-on-primary text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg active:scale-95 transition-transform"
-                        >
-                          Instalar
-                        </button>
-                      </div>
-                    )}
                   </div>
                 </SettingsAccordion>
 
