@@ -286,7 +286,12 @@ class ErrorBoundary extends Component<any, any> {
     this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError(error: Error) {
+  static getDerivedStateFromError(error: any) {
+    // Ignore Vite WebSocket errors which are common in the preview environment
+    const errorMessage = error?.message || String(error);
+    if (errorMessage.includes('WebSocket') || errorMessage.includes('[vite]')) {
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 
@@ -627,9 +632,15 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
       animate={{ opacity: 1, y: 0 }}
       className="mb-8"
     >
-      <div className="flex items-center gap-2 mb-4">
-        <Sparkles size={16} className="text-primary" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lukinho Sincero</span>
+      <div className="overflow-hidden relative group">
+        <video 
+          src="https://tidas.com.br/arquivos/avatar.mp4" 
+          autoPlay 
+          loop 
+          muted 
+          playsInline
+          className="w-full h-auto object-contain"
+        />
       </div>
       
       {loading && !prediction ? (
@@ -637,14 +648,16 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
           <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
         </div>
       ) : (
-        <motion.p 
+        <motion.div 
           key={prediction} // Force re-animation when prediction changes
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-3xl font-black text-primary leading-[1.4] tracking-tight"
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-[#cdfc54] p-8 rounded-[48px] text-[#0f111a]"
         >
-          <TypingText text={prediction} />
-        </motion.p>
+          <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
+            <TypingText text={prediction} />
+          </p>
+        </motion.div>
       )}
     </motion.div>
   );

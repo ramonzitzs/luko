@@ -11,6 +11,22 @@
     <meta name="apple-mobile-web-app-title" content="Luko" />
     <link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I" />
     <link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I" />
+    <script>
+      // Suppress Vite WebSocket errors which are common in the preview environment
+      (function() {
+        const suppress = (e) => {
+          const msg = e.message || (e.error && e.error.message) || (e.reason && (e.reason.message || e.reason)) || '';
+          if (typeof msg === 'string' && (msg.includes('WebSocket') || msg.includes('[vite]'))) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+          return false;
+        };
+        window.addEventListener('error', suppress, true);
+        window.addEventListener('unhandledrejection', suppress, true);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
