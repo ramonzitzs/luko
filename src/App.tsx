@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect, Component, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useMemo, useEffect, Component, ReactNode, ErrorInfo, useRef, useCallback } from 'react';
 import { 
   Plus, 
   LayoutDashboard, 
@@ -289,7 +289,11 @@ class ErrorBoundary extends Component<any, any> {
   static getDerivedStateFromError(error: any) {
     // Ignore Vite WebSocket errors which are common in the preview environment
     const errorMessage = error?.message || String(error);
-    if (errorMessage.includes('WebSocket') || errorMessage.includes('[vite]')) {
+    if (
+      errorMessage.includes('WebSocket') || 
+      errorMessage.includes('[vite]') || 
+      errorMessage.includes('closed without opened')
+    ) {
       return { hasError: false, error: null };
     }
     return { hasError: true, error };
@@ -507,24 +511,261 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
   );
 };
 
-const TypingText = ({ text }: { text: string }) => {
-  const [displayedText, setDisplayedText] = useState("");
+const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onComplete?: () => void, skipAnimation?: boolean }) => {
+  const [displayedText, setDisplayedText] = useState(skipAnimation ? text : '');
   
   useEffect(() => {
+    if (skipAnimation) {
+      setDisplayedText(text);
+      if (onComplete) onComplete();
+      return;
+    }
     let i = 0;
-    setDisplayedText("");
+    setDisplayedText('');
     const timer = setInterval(() => {
-      setDisplayedText(text.slice(0, i + 1));
       i++;
-      if (i >= text.length) clearInterval(timer);
-    }, 30);
+      setDisplayedText(text.slice(0, i));
+      if (i >= text.length) {
+        clearInterval(timer);
+        if (onComplete) {
+          // Small delay before calling onComplete to feel more natural
+          setTimeout(onComplete, 500);
+        }
+      }
+    }, 25);
     return () => clearInterval(timer);
-  }, [text]);
+  }, [text, skipAnimation]);
 
-  return <span>{displayedText}</span>;
+  // Robust parser for **text** that works during typing
+  const parts = displayedText.split(/(\*\*)/g);
+  let isBold = false;
+  return (
+    <span>
+      {parts.map((part, index) => {
+        if (part === '**') {
+          isBold = !isBold;
+          return null;
+        }
+        
+        const isNegative = isBold && (part.includes('-R$') || part.includes('R$ -') || part.trim().startsWith('-'));
+        
+        return (
+          <span 
+            key={index} 
+            className={isBold ? (isNegative ? "text-red-500 font-bold" : "text-[#cdfc54] font-bold") : ""}
+          >
+            {part}
+          </span>
+        );
+      })}
+    </span>
+  );
 };
 
-const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[], settings: UserSettings }) => {
+const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnimation }: { text: string, delay: number, avatar: string, isLast?: boolean, onComplete?: () => void, skipAnimation?: boolean }) => {
+  const [visible, setVisible] = useState(skipAnimation);
+  const [typing, setTyping] = useState(false);
+  const [startTyping, setStartTyping] = useState(skipAnimation);
+
+  useEffect(() => {
+    if (skipAnimation) {
+      setVisible(true);
+      setTyping(false);
+      setStartTyping(true);
+      return;
+    }
+    const showTimer = setTimeout(() => {
+      setVisible(true);
+      setTyping(true);
+      const typingTimer = setTimeout(() => {
+        setTyping(false);
+        setStartTyping(true);
+      }, 1200);
+      return () => clearTimeout(typingTimer);
+    }, delay);
+    return () => clearTimeout(showTimer);
+  }, [delay, skipAnimation]);
+
+  if (!visible) return null;
+
+  return (
+    <motion.div 
+      initial={skipAnimation ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`flex items-start gap-5 ${isLast ? '' : 'mb-10'}`}
+    >
+      <div className="flex-shrink-0 mt-1">
+        <img 
+          src={avatar} 
+          className="w-7 h-7 rounded-full object-cover" 
+          referrerPolicy="no-referrer"
+        />
+      </div>
+      <div className="flex-1">
+        {typing ? (
+          <div className="flex gap-1.5 py-2">
+            <div className="w-1.5 h-1.5 bg-[#cdfc54] rounded-full animate-bounce [animation-duration:0.6s]" />
+            <div className="w-1.5 h-1.5 bg-[#cdfc54] rounded-full animate-bounce [animation-duration:0.6s] [animation-delay:0.15s]" />
+            <div className="w-1.5 h-1.5 bg-[#cdfc54] rounded-full animate-bounce [animation-duration:0.6s] [animation-delay:0.3s]" />
+          </div>
+        ) : (
+          <div className="text-white text-[19px] font-semibold leading-[1.5] tracking-tight">
+            {startTyping ? <TypingText text={text} onComplete={onComplete} skipAnimation={skipAnimation} /> : null}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
+const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, onComplete, skipAnimation }: { transactions: Transaction[], settings: UserSettings, isReady: boolean, userName?: string, prediction: string, onComplete?: (finished: boolean) => void, skipAnimation?: boolean }) => {
+  const [show, setShow] = useState(skipAnimation);
+  const [messages, setMessages] = useState<{ greeting: string, prediction: string, quota: string } | null>(null);
+  const prevPredictionRef = useRef<string>('');
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const daysRemaining = Math.max(1, daysInMonth - now.getDate() + 1);
+
+  const formatBRL = (val: number) => {
+    return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
+  // Helper to get a stable index based on the prediction string
+  const getStableIndex = (str: string, max: number, salt: string) => {
+    let hash = 0;
+    const combined = str + salt;
+    for (let i = 0; i < combined.length; i++) {
+      hash = ((hash << 5) - hash) + combined.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash) % max;
+  };
+
+  useEffect(() => {
+    if (isReady && prediction) {
+      const isNewPrediction = prediction !== prevPredictionRef.current;
+      
+      if (isNewPrediction) {
+        setShow(false);
+        prevPredictionRef.current = prediction;
+      } else if (messages) {
+        // If same prediction and we already have messages, just ensure they are shown
+        setShow(true);
+        return;
+      }
+
+      // 1. Calculations based on user's explicit logic
+      const totalIncome = settings.incomes.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
+      const limit = settings.monthlyLimit || totalIncome;
+      
+      const currentMonthExpenses = transactions.filter(t => {
+        const tDate = new Date(t.date);
+        const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+        const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+        const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+        return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
+      });
+
+      const totalMonthlyExpenses = currentMonthExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      
+      const futureExpenses = currentMonthExpenses
+        .filter(t => !t.isPaid)
+        .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+      // VALOR DISPONÍVEL (Exactly what shows on the dashboard)
+      const dashboardAvailable = Math.max(0, limit - totalMonthlyExpenses);
+      
+      // CHAT 2: VALOR DISPONÍVEL - FUTUROS GASTOS (Vencidas e A Pagar)
+      const finalBalance = dashboardAvailable - futureExpenses;
+      
+      // CHAT 3: FINAL BALANCE / DAYS
+      const dailyQuota = finalBalance / daysRemaining;
+
+      // 2. Dynamic Messages
+      const firstName = userName || 'Adriano';
+      const greetings = [
+        `Fala, ${firstName}! Fiz os cálculos aqui (e olha, quase queimei meus circuitos).`,
+        `E aí, ${firstName}! Dei uma olhada nas tuas contas e o negócio tá frenético, mas calculei tudo.`,
+        `Opa, ${firstName}! Terminei a matemática aqui. Não foi fácil, mas o Lukinho resolve.`,
+        `Diz aí, ${firstName}! Fiz as contas aqui e tive que usar até os dedos do pé pra terminar.`
+      ];
+
+      const valStr = `**${formatBRL(finalBalance)}**`;
+      const predictionMsgs = finalBalance > 0 
+        ? [
+            `Se você parar de inventar moda, termina o mês com ${valStr} no bolso. Dá pra ser feliz!`,
+            `Olha só, vai sobrar ${valStr} no último dia do mês. Já dá pra pensar no churrasco!`,
+            `Tudo pago e ainda sobram ${valStr}. Você tá voando, campeão!`
+          ]
+        : [
+            `Ih, rapaz... se pagar tudo, vai faltar ${valStr}. Hora de vender um rim ou cancelar o streaming!`,
+            `A conta não fecha: vai ficar ${valStr} no vermelho. O Serasa já tá digitando seu nome...`,
+            `Previsão de ${valStr} negativos. Melhor começar a treinar a dieta do sol!`
+          ];
+
+      const quotaStr = `**${formatBRL(dailyQuota)}**`;
+      const quotaMsgs = [
+        `Pra não passar vergonha, você só pode gastar ${quotaStr} por dia. Segura esse cartão!`,
+        `Sua meta de hoje é não passar de ${quotaStr}. Se sobrar, é lucro!`,
+        `Liberado gastar ${quotaStr} hoje. Se gastar mais, o iFood vai ter que ser deletado!`,
+        `Foca no objetivo: ${quotaStr} por dia é o seu limite de sobrevivência.`
+      ];
+
+      setMessages({
+        greeting: greetings[getStableIndex(prediction, greetings.length, 'greet')],
+        prediction: predictionMsgs[getStableIndex(prediction, predictionMsgs.length, 'pred')],
+        quota: quotaMsgs[getStableIndex(prediction, quotaMsgs.length, 'quota')]
+      });
+
+      if (isNewPrediction) {
+        const timer = setTimeout(() => setShow(true), 800);
+        return () => clearTimeout(timer);
+      } else {
+        setShow(true);
+      }
+    }
+  }, [isReady, prediction, transactions.length, settings.incomes.length, settings.monthlyLimit, skipAnimation]);
+
+  if (!show || !messages) return null;
+
+  const avatar = "https://tidas.com.br/arquivos/avatar_chat.png";
+
+  return (
+    <motion.div 
+      initial={skipAnimation ? { opacity: 1 } : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="pt-[65px] pb-[65px] px-2"
+    >
+      <ChatMessage 
+        avatar={avatar}
+        delay={0}
+        text={messages.greeting}
+        skipAnimation={skipAnimation}
+      />
+      
+      <ChatMessage 
+        avatar={avatar}
+        delay={4000}
+        text={messages.prediction}
+        skipAnimation={skipAnimation}
+      />
+      
+      <ChatMessage 
+        avatar={avatar}
+        delay={9000}
+        isLast
+        text={messages.quota}
+        onComplete={() => onComplete?.(true)}
+        skipAnimation={skipAnimation}
+      />
+    </motion.div>
+  );
+};
+
+const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skipAnimation }: { transactions: Transaction[], settings: UserSettings, userName?: string, onChatComplete?: (finished: boolean) => void, skipAnimation?: boolean }) => {
   const [prediction, setPrediction] = useState<string>(() => {
     // Initial state from cache to avoid flicker if valid
     const cached = localStorage.getItem('luko_prediction_v3');
@@ -536,6 +777,19 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
     return '';
   });
   const [loading, setLoading] = useState(!prediction);
+  const [isVideoLoaded, setIsVideoLoaded] = useState(skipAnimation);
+
+  useEffect(() => {
+    if (skipAnimation) {
+      setIsVideoLoaded(true);
+      return;
+    }
+    // Fallback: if video takes too long to load, show content anyway
+    const timer = setTimeout(() => {
+      setIsVideoLoaded(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [skipAnimation]);
 
   useEffect(() => {
     const generatePrediction = async () => {
@@ -579,8 +833,6 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
 
         // If data changed or cache expired, fetch new prediction
         setLoading(true);
-        // Don't clear prediction immediately to avoid empty space, 
-        // TypingText will handle the transition when newPrediction arrives.
 
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
@@ -612,7 +864,6 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
         localStorage.setItem('luko_data_signature_v3', currentSignature);
       } catch (error) {
         console.error('Lukinho Error:', error);
-        // Only show error if we don't have any prediction at all
         if (!prediction) {
           setPrediction('Lukinho está sem sinal. Tente novamente mais tarde.');
         }
@@ -621,45 +872,86 @@ const LukinhoSincero = ({ transactions, settings }: { transactions: Transaction[
       }
     };
 
-    // Small delay to wait for Firestore data to stabilize
     const timeout = setTimeout(generatePrediction, 1000);
     return () => clearTimeout(timeout);
-  }, [transactions.length, settings.monthlyLimit, settings.incomes.length]);
+  }, [transactions, settings.monthlyLimit, settings.incomes]);
+
+  const isReady = !loading && isVideoLoaded && prediction;
+
+  useEffect(() => {
+    if (!isReady && !skipAnimation) {
+      onChatComplete?.(false);
+    }
+  }, [isReady, skipAnimation]);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mb-8"
-    >
-      <div className="overflow-hidden relative group">
+    <div className="min-h-[300px] flex flex-col justify-center relative">
+      {/* Hidden video to trigger loading */}
+      {!isVideoLoaded && (
         <video 
           src="https://tidas.com.br/arquivos/avatar.mp4" 
-          autoPlay 
-          loop 
-          muted 
+          onLoadedData={() => setIsVideoLoaded(true)}
+          className="absolute opacity-0 pointer-events-none"
+          muted={true}
           playsInline
-          className="w-full h-auto object-contain"
         />
-      </div>
-      
-      {loading && !prediction ? (
-        <div className="h-20 flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-        </div>
-      ) : (
-        <motion.div 
-          key={prediction} // Force re-animation when prediction changes
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-[#cdfc54] p-8 rounded-[48px] text-[#0f111a]"
-        >
-          <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
-            <TypingText text={prediction} />
-          </p>
-        </motion.div>
       )}
-    </motion.div>
+
+      <AnimatePresence mode="wait">
+        {!isReady ? (
+          <motion.div 
+            key="loading"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center justify-center py-12"
+          >
+            <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
+            <p className="text-slate-400 text-sm font-medium animate-pulse">Carregando Lukinho sincero...</p>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="content"
+            initial={skipAnimation ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.98, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+          >
+            <div className="overflow-hidden relative group rounded-t-[32px]">
+              <video 
+                src="https://tidas.com.br/arquivos/avatar.mp4" 
+                autoPlay 
+                loop 
+                muted={true}
+                onCanPlay={(e) => e.currentTarget.muted = true}
+                playsInline
+                className="w-full h-auto object-contain"
+              />
+            </div>
+            
+            <motion.div 
+              initial={skipAnimation ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: skipAnimation ? 0 : 0.2 }}
+              className="bg-[#cdfc54] p-8 rounded-[32px] text-[#0f111a] shadow-[0_0_40px_rgba(205,252,84,0.35)] relative z-10 -mt-2"
+            >
+              <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
+                <TypingText text={prediction} skipAnimation={skipAnimation} />
+              </p>
+            </motion.div>
+
+            <LukinhoChat 
+              transactions={transactions} 
+              settings={settings} 
+              isReady={isReady} 
+              userName={userName}
+              prediction={prediction}
+              onComplete={onChatComplete}
+              skipAnimation={skipAnimation}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 };
 
@@ -691,6 +983,8 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [pixShareData, setPixShareData] = useState<{ amountPerPerson: number, pixKey: string } | null>(null);
   const [isEditingPixKey, setIsEditingPixKey] = useState(false);
+  const [chatFinished, setChatFinished] = useState(false);
+  const [hasVisitedLukinho, setHasVisitedLukinho] = useState(false);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -725,7 +1019,10 @@ export default function App() {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [activeTab]);
+    if (activeTab === 'goals' && !hasVisitedLukinho) {
+      setHasVisitedLukinho(true);
+    }
+  }, [activeTab, hasVisitedLukinho]);
 
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -1179,7 +1476,7 @@ export default function App() {
       const isNotFuture = tDate <= now;
       
       return (isSameMonth || (isRecurring && isFutureOrCurrent)) && isNotFuture;
-    });
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [transactions, selectedMonth]);
 
   const extratoTransactions = useMemo(() => {
@@ -1195,6 +1492,31 @@ export default function App() {
       
       return isSameMonth || (isRecurring && isFutureOrCurrent);
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions, selectedMonth]);
+
+  const futureTransactions = useMemo(() => {
+    const currentMonth = selectedMonth.getMonth();
+    const currentYear = selectedMonth.getFullYear();
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    return transactions.filter(t => {
+      const tDate = new Date(t.date);
+      const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+      
+      // "Ainda vão vencer" means the due date in the selected month is today or in the future
+      const day = t.dueDay || tDate.getDate();
+      const effectiveDate = new Date(currentYear, currentMonth, day);
+      const isFutureDate = effectiveDate >= now;
+      
+      return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent)) && !t.isPaid && isFutureDate;
+    }).sort((a, b) => {
+      const dayA = a.dueDay || new Date(a.date).getDate();
+      const dayB = b.dueDay || new Date(b.date).getDate();
+      return dayA - dayB;
+    });
   }, [transactions, selectedMonth]);
 
   const billsDueThisWeek = useMemo(() => {
@@ -1837,13 +2159,20 @@ export default function App() {
 
                   <section>
                     <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-bold text-lg">Transações recentes</h3>
-                      <button className="text-primary text-sm font-medium" onClick={() => setActiveTab('history')}>Ver tudo</button>
+                      <h3 
+                        className="font-bold text-lg cursor-pointer hover:text-primary transition-colors"
+                        onClick={() => {
+                          setSelectedHistoryCategory('Todas');
+                          setActiveTab('history');
+                        }}
+                      >
+                        Transações recentes
+                      </h3>
                     </div>
                     <div className="relative">
-                      <div className="space-y-3">
+                      <div className="space-y-3 pb-6">
                         <AnimatePresence mode="popLayout">
-                          {filteredTransactions.slice(0, 6).map((t) => (
+                          {filteredTransactions.slice(0, 5).map((t) => (
                             <TransactionItem 
                               key={t.id} 
                               t={t} 
@@ -1854,11 +2183,45 @@ export default function App() {
                           ))}
                         </AnimatePresence>
                       </div>
-                      {filteredTransactions.length > 6 && (
+                      {filteredTransactions.length > 0 && (
                         <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
                       )}
                     </div>
                   </section>
+
+                  {futureTransactions.length > 0 && (
+                    <section className="mt-8">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 
+                          className="font-bold text-lg cursor-pointer hover:text-primary transition-colors"
+                          onClick={() => {
+                            setSelectedHistoryCategory('Futuros');
+                            setActiveTab('history');
+                          }}
+                        >
+                          Lançamentos futuros
+                        </h3>
+                      </div>
+                      <div className="relative">
+                        <div className="space-y-3 pb-6">
+                          <AnimatePresence mode="popLayout">
+                            {futureTransactions.slice(0, 5).map((t) => (
+                              <TransactionItem 
+                                key={t.id} 
+                                t={t} 
+                                deleteTransaction={deleteTransaction} 
+                                privacyMode={settings.privacyMode} 
+                                onClick={() => setSelectedTransaction(t)}
+                              />
+                            ))}
+                          </AnimatePresence>
+                        </div>
+                        {futureTransactions.length > 0 && (
+                          <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
+                        )}
+                      </div>
+                    </section>
+                  )}
                 </>
               )}
             </motion.div>
@@ -1874,6 +2237,7 @@ export default function App() {
                   className="bg-[#1C1F2B] text-xs font-bold p-2 rounded-xl border border-slate-800 outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value="Todas">Todas Categorias</option>
+                  <option value="Futuros">Lançamentos Futuros</option>
                   {Object.keys(CATEGORIES).filter(cat => {
                     // Only show categories that have transactions in the current month
                     return extratoTransactions.some(t => t.category === cat);
@@ -1884,20 +2248,27 @@ export default function App() {
               </div>
               
               <div className="space-y-6">
-                {extratoTransactions.filter(t => selectedHistoryCategory === 'Todas' || t.category === selectedHistoryCategory).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 text-center">
-                    <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-slate-600 mb-4">
-                      <History size={32} />
-                    </div>
-                    <p className="text-slate-500 font-bold">Sem lançamentos</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-3">
-                      <AnimatePresence mode="popLayout">
-                        {extratoTransactions
-                          .filter(t => selectedHistoryCategory === 'Todas' || t.category === selectedHistoryCategory)
-                          .map((t) => (
+                {(() => {
+                  const displayedTransactions = selectedHistoryCategory === 'Futuros' 
+                    ? futureTransactions 
+                    : extratoTransactions.filter(t => selectedHistoryCategory === 'Todas' || t.category === selectedHistoryCategory);
+
+                  if (displayedTransactions.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-slate-600 mb-4">
+                          <History size={32} />
+                        </div>
+                        <p className="text-slate-500 font-bold">Sem lançamentos</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <div className="space-y-3">
+                        <AnimatePresence mode="popLayout">
+                          {displayedTransactions.map((t) => (
                             <TransactionItem 
                               key={t.id} 
                               t={t} 
@@ -1906,150 +2277,167 @@ export default function App() {
                               onClick={() => setSelectedTransaction(t)}
                             />
                           ))}
-                      </AnimatePresence>
-                    </div>
-
-                    {/* Summary at the end of the list */}
-                    <div className="mt-8 pb-12">
-                      <div className="flex justify-between items-start">
-                        {selectedHistoryCategory === 'Todas' ? (
-                          <>
-                            <div className="space-y-1">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Ganhos</p>
-                              <p className="text-xl font-black text-emerald-500">
-                                {formatCurrency(settings.incomes.reduce((acc, curr) => acc + curr.value, 0))}
-                              </p>
-                            </div>
-                            <div className="text-right space-y-1">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gastos</p>
-                              <p className="text-xl font-black text-white">
-                                {formatCurrency(extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0))}
-                              </p>
-                              {(() => {
-                                const totalInc = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
-                                const totalExp = extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0);
-                                const diff = totalInc - totalExp;
-                                return (
-                                  <p className={`text-[10px] font-bold ${diff >= 0 ? 'text-primary/60' : 'text-rose-500/60'} uppercase tracking-widest`}>
-                                    {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
-                                  </p>
-                                );
-                              })()}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="w-full text-right">
-                            <div className="space-y-1">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total em {selectedHistoryCategory}</p>
-                              <p className="text-2xl font-black text-white">
-                                {formatCurrency(extratoTransactions.filter(t => t.category === selectedHistoryCategory).reduce((acc, curr) => acc + curr.amount, 0))}
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'goals' && (
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              className="pb-4 max-w-md mx-auto"
-              onViewportEnter={() => {
-                localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
-              }}
-            >
-              <LukinhoSincero transactions={transactions} settings={settings} />
-
-              <div className="mb-2">
-                {(() => {
-                  const currentMonthExpenses = transactions.filter(t => 
-                    t.type === 'expense' && 
-                    new Date(t.date).getMonth() === selectedMonth.getMonth() &&
-                    new Date(t.date).getFullYear() === selectedMonth.getFullYear()
-                  );
-
-                  const categories: { [key: string]: number } = {};
-                  currentMonthExpenses.forEach(t => {
-                    categories[t.category] = (categories[t.category] || 0) + t.amount;
-                  });
-                  
-                  const total = currentMonthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
-                  
-                  const categoryData = Object.entries(categories)
-                    .map(([name, value]) => ({ name, value }))
-                    .filter(item => total > 0 && Math.round((item.value / total) * 100) > 0)
-                    .sort((a, b) => b.value - a.value);
-
-                  const COLORS = ['#cdfc54', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#10b981'];
-
-                  return (
-                    <>
-                      <div className="h-[260px] w-full relative">
-                        <ResponsiveContainer width="99%" height={260} debounce={50}>
-                          <PieChart>
-                            <Pie
-                              data={categoryData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={80}
-                              outerRadius={110}
-                              paddingAngle={8}
-                              dataKey="value"
-                              stroke="none"
-                              isAnimationActive={true}
-                            >
-                              {categoryData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Pie>
-                          </PieChart>
-                        </ResponsiveContainer>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total</p>
-                          <p className="text-2xl font-black text-white">
-                            {formatCurrency(total)}
-                          </p>
-                        </div>
+                        </AnimatePresence>
                       </div>
 
-                      <div className="space-y-3 mt-6 mb-4 relative">
-                        {categoryData.map((item) => (
-                          <div 
-                            key={item.name} 
-                            onClick={() => {
-                              setSelectedHistoryCategory(item.name);
-                              setActiveTab('history');
-                            }}
-                            className="flex items-center justify-between p-4 bg-[#1C1F2B] rounded-[20px] border border-slate-800/50 active:scale-[0.98] transition-transform cursor-pointer"
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${CATEGORIES[item.name]?.color || 'bg-slate-800 text-slate-400'}`}>
-                                {CATEGORIES[item.name]?.icon || <MoreHorizontal size={18} />}
+                      {/* Summary at the end of the list */}
+                      <div className="mt-8 pb-12">
+                        <div className="flex justify-between items-start">
+                          {selectedHistoryCategory === 'Todas' ? (
+                            <>
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Ganhos</p>
+                                <p className="text-xl font-black text-emerald-500">
+                                  {formatCurrency(settings.incomes.reduce((acc, curr) => acc + curr.value, 0))}
+                                </p>
                               </div>
-                              <div>
-                                <p className="text-sm font-bold text-white">{item.name}</p>
-                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                                  {total > 0 ? Math.round((item.value / total) * 100) : 0}% do total
+                              <div className="text-right space-y-1">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gastos</p>
+                                <p className="text-xl font-black text-white">
+                                  {formatCurrency(extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0))}
+                                </p>
+                                {(() => {
+                                  const totalInc = settings.incomes.reduce((acc, curr) => acc + curr.value, 0);
+                                  const totalExp = extratoTransactions.filter(t => t.type === 'expense' && t.category !== 'Cartão').reduce((acc, curr) => acc + curr.amount, 0);
+                                  const diff = totalInc - totalExp;
+                                  return (
+                                    <p className={`text-[10px] font-bold ${diff >= 0 ? 'text-primary/60' : 'text-rose-500/60'} uppercase tracking-widest`}>
+                                      {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                                    </p>
+                                  );
+                                })()}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="w-full text-right">
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                  {selectedHistoryCategory === 'Futuros' ? 'Total Futuro' : `Total em ${selectedHistoryCategory}`}
+                                </p>
+                                <p className="text-2xl font-black text-white">
+                                  {formatCurrency(displayedTransactions.reduce((acc, curr) => acc + curr.amount, 0))}
                                 </p>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <p className="text-sm font-black text-white">{formatCurrency(item.value)}</p>
-                            </div>
-                          </div>
-                        ))}
+                          )}
+                        </div>
                       </div>
                     </>
                   );
                 })()}
               </div>
             </motion.div>
+          )}
+
+          {hasVisitedLukinho && (
+            <div style={{ display: activeTab === 'goals' ? 'block' : 'none' }}>
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                className="max-w-md mx-auto"
+                onViewportEnter={() => {
+                  localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
+                }}
+              >
+                <LukinhoSincero 
+                  transactions={transactions} 
+                  settings={settings} 
+                  userName={user?.displayName?.split(' ')[0]} 
+                  onChatComplete={(finished) => setChatFinished(finished)}
+                  skipAnimation={chatFinished}
+                />
+
+              {chatFinished && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6 }}
+                >
+                  {(() => {
+                    const currentMonthExpenses = transactions.filter(t => 
+                      t.type === 'expense' && 
+                      new Date(t.date).getMonth() === selectedMonth.getMonth() &&
+                      new Date(t.date).getFullYear() === selectedMonth.getFullYear()
+                    );
+
+                    const categories: { [key: string]: number } = {};
+                    currentMonthExpenses.forEach(t => {
+                      categories[t.category] = (categories[t.category] || 0) + t.amount;
+                    });
+                    
+                    const total = currentMonthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+                    
+                    const categoryData = Object.entries(categories)
+                      .map(([name, value]) => ({ name, value }))
+                      .filter(item => total > 0 && Math.round((item.value / total) * 100) > 0)
+                      .sort((a, b) => b.value - a.value);
+
+                    const COLORS = ['#cdfc54', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#10b981'];
+
+                    return (
+                      <>
+                        <div className="h-[260px] w-full relative">
+                          <ResponsiveContainer width="99%" height={260} debounce={50}>
+                            <PieChart>
+                              <Pie
+                                data={categoryData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={80}
+                                outerRadius={110}
+                                paddingAngle={8}
+                                dataKey="value"
+                                stroke="none"
+                                isAnimationActive={true}
+                              >
+                                {categoryData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total</p>
+                            <p className="text-2xl font-black text-white">
+                              {formatCurrency(total)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 mt-6 mb-4 relative">
+                          {categoryData.map((item) => (
+                            <div 
+                              key={item.name} 
+                              onClick={() => {
+                                setSelectedHistoryCategory(item.name);
+                                setActiveTab('history');
+                              }}
+                              className="flex items-center justify-between p-4 bg-[#1C1F2B] rounded-[20px] border border-slate-800/50 active:scale-[0.98] transition-transform cursor-pointer"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${CATEGORIES[item.name]?.color || 'bg-slate-800 text-slate-400'}`}>
+                                  {CATEGORIES[item.name]?.icon || <MoreHorizontal size={18} />}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-white">{item.name}</p>
+                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                    {total > 0 ? Math.round((item.value / total) * 100) : 0}% do total
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-black text-white">{formatCurrency(item.value)}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </motion.div>
+              )}
+            </motion.div>
+          </div>
           )}
 
           {activeTab === 'more' && (
