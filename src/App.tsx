@@ -25,6 +25,7 @@ import {
   Wallet,
   Sparkles,
   Bell,
+  Check,
   Droplets,
   Zap,
   Youtube,
@@ -138,6 +139,7 @@ interface Notification {
   type: 'warning' | 'info' | 'success';
   date: Date;
   category?: string;
+  transactionId?: string;
 }
 
 // --- Helper for Currency Formatting ---
@@ -204,6 +206,7 @@ const MoneyInput = ({ value, onChange, placeholder, className, name }: { value: 
   return (
     <input
       type="text"
+      inputMode="numeric"
       name={name}
       value={displayValue}
       onChange={handleChange}
@@ -505,6 +508,55 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
             <p className="text-[10px] font-bold text-slate-500 mt-0.5">
               {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : ''}
             </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const NotificationItem: React.FC<{ 
+  n: Notification, 
+  onRead: (id: string) => void, 
+  onClick: () => void
+}> = ({ n, onRead, onClick }) => {
+  const x = useMotionValue(0);
+  const opacity = useTransform(x, [-60, -20, 0], [1, 0.5, 0]);
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl">
+      <motion.div 
+        style={{ opacity }}
+        className="absolute inset-0 bg-rose-600 flex items-center justify-end px-6 text-white"
+      >
+        <Trash2 size={20} />
+      </motion.div>
+      <motion.div 
+        drag="x"
+        style={{ x }}
+        dragConstraints={{ left: -100, right: 0 }}
+        dragElastic={0.1}
+        onDragEnd={() => {
+          if (x.get() < -60) {
+            onRead(n.id);
+          } else {
+            x.set(0);
+          }
+        }}
+        onClick={onClick}
+        whileDrag={{ scale: 1.02 }}
+        className="bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50 flex items-center gap-4 relative z-10 cursor-grab active:cursor-grabbing group transition-transform"
+      >
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${
+          n.type === 'warning' ? 'bg-rose-500/10 text-rose-500' : 'bg-primary/10 text-primary'
+        }`}>
+          {n.category && CATEGORIES[n.category] ? CATEGORIES[n.category].icon : <Bell size={18} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h4 className="font-bold text-sm truncate">{n.title}</h4>
+          <p className="text-xs text-slate-400 mt-1 truncate">{n.message}</p>
+        </div>
+        <div className="absolute right-4 opacity-10">
+          <ChevronRight size={20} />
         </div>
       </motion.div>
     </div>
@@ -985,6 +1037,8 @@ export default function App() {
   const [isEditingPixKey, setIsEditingPixKey] = useState(false);
   const [chatFinished, setChatFinished] = useState(false);
   const [hasVisitedLukinho, setHasVisitedLukinho] = useState(false);
+  const [isAnyModalOpen, setIsAnyModalOpen] = useState(false);
+  const [pushedNotificationIds, setPushedNotificationIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -1026,6 +1080,19 @@ export default function App() {
 
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+
+  useEffect(() => {
+    const isOpen = isModalOpen || isCardModalOpen || !!editingCard || !!editingIncome || !!editingTransaction || isNotificationOpen || isMonthPickerOpen || !!pixShareData;
+    setIsAnyModalOpen(isOpen);
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isModalOpen, isCardModalOpen, editingCard, editingIncome, editingTransaction, isNotificationOpen, isMonthPickerOpen, pixShareData]);
 
   const [newTransCategory, setNewTransCategory] = useState('Variados');
   const [newTransCardId, setNewTransCardId] = useState('');
@@ -1390,13 +1457,25 @@ export default function App() {
   const addCard = async (c: Omit<Card, 'id' | 'uid' | 'currentSpend'>) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'cards'), {
+      const cleanCard = {
         ...c,
         uid: user.uid,
-        familyId: settings.familyId,
         currentSpend: 0,
         order: cards.length
+      };
+      
+      // Remove undefined/null values
+      Object.keys(cleanCard).forEach(key => {
+        if ((cleanCard as any)[key] === undefined || (cleanCard as any)[key] === null) {
+          delete (cleanCard as any)[key];
+        }
       });
+
+      if (settings.familyId) {
+        (cleanCard as any).familyId = settings.familyId;
+      }
+
+      await addDoc(collection(db, 'cards'), cleanCard);
       setIsCardModalOpen(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'cards');
@@ -1463,6 +1542,7 @@ export default function App() {
     const currentMonth = selectedMonth.getMonth();
     const currentYear = selectedMonth.getFullYear();
     const now = new Date();
+    now.setHours(23, 59, 59, 999);
 
     return transactions.filter(t => {
       const tDate = new Date(t.date);
@@ -1498,7 +1578,7 @@ export default function App() {
     const currentMonth = selectedMonth.getMonth();
     const currentYear = selectedMonth.getFullYear();
     const now = new Date();
-    now.setHours(0, 0, 0, 0);
+    now.setHours(23, 59, 59, 999);
 
     return transactions.filter(t => {
       const tDate = new Date(t.date);
@@ -1506,10 +1586,11 @@ export default function App() {
       const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
-      // "Ainda vão vencer" means the due date in the selected month is today or in the future
+      // "Ainda vão vencer" means the due date in the selected month is in the future (not today)
       const day = t.dueDay || tDate.getDate();
       const effectiveDate = new Date(currentYear, currentMonth, day);
-      const isFutureDate = effectiveDate >= now;
+      effectiveDate.setHours(0, 0, 0, 0);
+      const isFutureDate = effectiveDate > now;
       
       return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent)) && !t.isPaid && isFutureDate;
     }).sort((a, b) => {
@@ -1682,71 +1763,81 @@ export default function App() {
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
 
-    // Check due dates for all unpaid expenses
+    // Check due dates for all unpaid expenses that are considered "bills" (recurring or installments)
     transactions.forEach(t => {
-      if (t.type === 'expense' && !t.isPaid) {
+      if (t.type === 'expense' && !t.isPaid && !t.cardId) {
+        const isBill = t.isRecurring || (t.installmentsCount && t.installmentsCount > 1);
+        if (!isBill) return;
+
         const tDate = new Date(t.date);
         tDate.setHours(0, 0, 0, 0);
         
-        if (tDate.getTime() === today.getTime()) {
-          list.push({
-            id: `today-${t.id}-${todayStr}`,
-            title: 'Vencimento Hoje',
-            message: `A conta "${t.title}" vence hoje!`,
-            type: 'warning',
-            date: new Date(),
-            category: t.category
-          });
-        } else if (tDate.getTime() < today.getTime()) {
-          // Overdue notifications are "daily" - ID includes today's date
-          list.push({
+        let n: Notification | null = null;
+        if (tDate.getTime() < today.getTime()) {
+          // Overdue
+          n = {
             id: `overdue-${t.id}-${todayStr}`,
             title: 'Conta Vencida',
             message: `A conta "${t.title}" está atrasada!`,
             type: 'warning',
             date: new Date(),
-            category: t.category
-          });
+            category: t.category,
+            transactionId: t.id
+          };
+        } else if (tDate.getTime() === today.getTime()) {
+          // Due today
+          n = {
+            id: `today-${t.id}-${todayStr}`,
+            title: 'Vencimento Hoje',
+            message: `A conta "${t.title}" vence hoje!`,
+            type: 'warning',
+            date: new Date(),
+            category: t.category,
+            transactionId: t.id
+          };
         } else if (tDate.getTime() === tomorrow.getTime()) {
-          list.push({
+          // Due tomorrow
+          n = {
             id: `tomorrow-${t.id}-${todayStr}`,
             title: 'Vencimento Amanhã',
             message: `A conta "${t.title}" vence amanhã.`,
             type: 'info',
             date: new Date(),
-            category: t.category
-          });
+            category: t.category,
+            transactionId: t.id
+          };
+        }
+
+        if (n && !settings.readNotificationIds?.includes(n.id)) {
+          list.push(n);
         }
       }
     });
 
-    // Check card limits
-    cards.forEach(c => {
-      const usage = (c.currentSpend / c.limit) * 100;
-      if (usage >= 90) {
-        list.push({
-          id: `card-limit-${c.id}-${todayStr}`,
-          title: 'Cartão no Limite',
-          message: `O cartão ${c.name} atingiu ${Math.round(usage)}% do limite!`,
-          type: 'warning',
-          date: new Date()
-        });
-      }
-    });
+    return list;
+  }, [transactions, settings.readNotificationIds]);
 
-    // Check global limit
-    if (stats.progress >= 90) {
-      list.push({
-        id: `global-limit-${todayStr}`,
-        title: 'Orçamento Crítico',
-        message: `Você já utilizou ${Math.round(stats.progress)}% do seu orçamento mensal!`,
-        type: 'warning',
-        date: new Date()
+  useEffect(() => {
+    if (!settings.pushNotifications || !notifications.length) return;
+    
+    // Only push if permission is granted
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      notifications.forEach(n => {
+        // Only push unread notifications that haven't been pushed in this session
+        if (!settings.readNotificationIds?.includes(n.id) && !pushedNotificationIds.has(n.id)) {
+          new Notification(n.title, {
+            body: n.message,
+            icon: '/favicon.ico'
+          });
+          setPushedNotificationIds(prev => {
+            const next = new Set(prev);
+            next.add(n.id);
+            return next;
+          });
+        }
       });
     }
-
-    return list.filter(n => !(settings.readNotificationIds || []).includes(n.id));
-  }, [transactions, cards, stats, settings.readNotificationIds]);
+  }, [notifications, settings.pushNotifications, settings.readNotificationIds, pushedNotificationIds]);
 
   const [showSplash, setShowSplash] = useState(true);
 
@@ -1890,13 +1981,25 @@ export default function App() {
                   setIsNotificationOpen(true);
                   if (notifications.length > 0) {
                     const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), ...notifications.map(n => n.id)]));
-                    updateSettings({ readNotificationIds: newReadIds });
+                    // Keep only recent read IDs to avoid bloat (last 7 days)
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                    const filteredReadIds = newReadIds.filter(id => {
+                      const parts = id.split('-');
+                      const dateStr = parts[parts.length - 1];
+                      if (!dateStr || !dateStr.includes(':')) { // Simple check for YYYY-MM-DD
+                        const d = new Date(dateStr);
+                        return !isNaN(d.getTime()) && d >= sevenDaysAgo;
+                      }
+                      return true;
+                    });
+                    updateSettings({ readNotificationIds: filteredReadIds });
                   }
                 }}
                 className="relative p-2 flex items-center justify-center"
               >
-                <Bell size={20} className={notifications.length > 0 ? "text-white" : "text-slate-400"} />
-                {notifications.length > 0 && (
+                <Bell size={20} className={notifications.some(n => !settings.readNotificationIds?.includes(n.id)) ? "text-white" : "text-slate-400"} />
+                {notifications.some(n => !settings.readNotificationIds?.includes(n.id)) && (
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-[#0F111A]" />
                 )}
               </button>
@@ -2183,7 +2286,7 @@ export default function App() {
                           ))}
                         </AnimatePresence>
                       </div>
-                      {filteredTransactions.length > 0 && (
+                      {filteredTransactions.length > 0 && futureTransactions.length === 0 && (
                         <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
                       )}
                     </div>
@@ -2663,7 +2766,21 @@ export default function App() {
                         </div>
                       </div>
                       <button 
-                        onClick={() => updateSettings({ pushNotifications: !settings.pushNotifications })}
+                        onClick={async () => {
+                          if (typeof Notification === 'undefined') {
+                            alert('Seu navegador não suporta notificações.');
+                            return;
+                          }
+                          const newValue = !settings.pushNotifications;
+                          if (newValue && Notification.permission !== 'granted') {
+                            const permission = await Notification.requestPermission();
+                            if (permission !== 'granted') {
+                              alert('Por favor, habilite as notificações no seu navegador para receber alertas.');
+                              return;
+                            }
+                          }
+                          updateSettings({ pushNotifications: newValue });
+                        }}
                         className={`w-12 h-6 rounded-full transition-colors relative ${settings.pushNotifications ? 'bg-primary' : 'bg-slate-700'}`}
                       >
                         <motion.div 
@@ -2872,7 +2989,12 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  <button type="submit" className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20 mt-4">Salvar</button>
+                  <button 
+                    type="submit" 
+                    className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20 mt-4 active:opacity-80 transition-opacity"
+                  >
+                    Salvar
+                  </button>
                 </form>
               </motion.div>
             </div>
@@ -2994,17 +3116,23 @@ export default function App() {
                     </div>
                   ) : (
                     notifications.map(n => (
-                      <div key={n.id} className="bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50 flex items-center gap-4">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                          n.type === 'warning' ? 'bg-rose-500/10 text-rose-500' : 'bg-primary/10 text-primary'
-                        }`}>
-                          {(n as any).category && CATEGORIES[(n as any).category] ? CATEGORIES[(n as any).category].icon : <Bell size={18} />}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-sm">{n.title}</h4>
-                          <p className="text-xs text-slate-400 mt-1">{n.message}</p>
-                        </div>
-                      </div>
+                      <NotificationItem 
+                        key={n.id}
+                        n={n}
+                        onRead={(id) => {
+                          const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), id]));
+                          updateSettings({ readNotificationIds: newReadIds });
+                        }}
+                        onClick={() => {
+                          if (n.transactionId) {
+                            const trans = transactions.find(t => t.id === n.transactionId);
+                            if (trans) {
+                              setEditingTransaction(trans);
+                              setIsNotificationOpen(false);
+                            }
+                          }
+                        }}
+                      />
                     ))
                   )}
                 </div>
