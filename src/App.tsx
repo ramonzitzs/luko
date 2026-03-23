@@ -350,6 +350,7 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }, []);
 
   if (error) {
+    console.error("GlobalErrorUI caught an error", error);
     let errorMessage = "Ocorreu um erro inesperado.";
     try {
       if (error.message) {
@@ -386,9 +387,11 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 };
 
 async function testFirestoreConnection() {
+  console.log("Testing Firestore connection...");
   try {
     // Test connection to Firestore
     await getDocFromServer(doc(db, 'test', 'connection'));
+    console.log("Firestore connection successful.");
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error("Firestore is offline. Please check your configuration and internet connection.");
@@ -397,6 +400,7 @@ async function testFirestoreConnection() {
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  console.error("Firestore Error:", { operationType, path, error });
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -1066,6 +1070,10 @@ export default function App() {
   const [pushedNotificationIds, setPushedNotificationIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    console.log("Auth State:", { isAuthReady, user: !!user });
+  }, [isAuthReady, user]);
+
+  useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
       // Don't prevent default, let the browser handle it if it wants
       setDeferredPrompt(e);
@@ -1118,6 +1126,7 @@ export default function App() {
   // --- Auth ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log("onAuthStateChanged. User:", !!user);
       setUser(user);
       setIsAuthReady(true);
       if (user) {
@@ -1205,17 +1214,23 @@ export default function App() {
 
   // --- Actions ---
   const handleLogin = async () => {
+    console.log("Login attempt started.");
     try {
       await signInWithPopup(auth, googleProvider);
+      console.log("Login successful.");
       setActiveTab('dashboard');
     } catch (error) {
       console.error('Login error:', error);
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  const handleLogout = () => {
+    console.log("Logout attempt.");
+    signOut(auth);
+  };
 
   const addTransaction = async (t: Omit<Transaction, 'id' | 'uid' | 'date'>) => {
+    console.log("addTransaction attempt:", t);
     if (!user) return;
     try {
       console.log('Adding transaction:', t);
@@ -1449,6 +1464,7 @@ export default function App() {
   };
 
   const deleteTransaction = async (id: string) => {
+    console.log("deleteTransaction attempt:", id);
     if (!user) return;
     try {
       await deleteDoc(doc(db, 'transactions', id));
@@ -1488,6 +1504,7 @@ export default function App() {
   };
 
   const addCard = async (c: Omit<Card, 'id' | 'uid' | 'currentSpend'>) => {
+    console.log("addCard attempt:", c);
     if (!user) return;
     try {
       const cleanCard = {
@@ -1516,6 +1533,7 @@ export default function App() {
   };
 
   const deleteCard = async (id: string) => {
+    console.log("deleteCard attempt:", id);
     if (!user) return;
     if (!window.confirm('Tem certeza que deseja excluir este cartão?')) return;
     try {
@@ -1526,6 +1544,7 @@ export default function App() {
   };
 
   const updateCard = async (id: string, data: Partial<Card>) => {
+    console.log("updateCard attempt:", id, data);
     if (!user) return;
     try {
       await updateDoc(doc(db, 'cards', id), data);
@@ -1548,6 +1567,7 @@ export default function App() {
   };
 
   const updateSettings = async (newSettings: Partial<UserSettings>) => {
+    console.log("updateSettings attempt:", newSettings);
     if (!user) return;
     try {
       await updateDoc(doc(db, 'users', user.uid), newSettings);
@@ -1892,14 +1912,36 @@ export default function App() {
   };
 
   const renderContent = () => {
+    console.log("Rendering content. User:", !!user, "Tab:", activeTab);
     try {
       if (!user) {
       return (
-        <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
+        <div className="min-h-screen min-h-[100dvh] bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
+          {/* PWA Install Banner */}
+          {deferredPrompt && (
+            <motion.div 
+              initial={{ y: -100 }}
+              animate={{ y: 0 }}
+              className="fixed top-0 left-0 right-0 p-4 z-50"
+            >
+              <div className="bg-[#0F111A] text-white p-4 rounded-2xl flex items-center justify-between shadow-2xl">
+                <div className="flex items-center gap-3">
+                  <Download size={20} className="text-[#cdfc54]" />
+                  <p className="text-xs font-bold uppercase tracking-widest">Instale o Luko</p>
+                </div>
+                <button 
+                  onClick={handleInstallClick}
+                  className="bg-[#cdfc54] text-[#0F111A] px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest"
+                >
+                  Instalar
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
             className="max-w-sm w-full relative z-10"
           >
             <div className="mb-16">
@@ -1933,7 +1975,7 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
+      <div className="min-h-screen min-h-[100dvh] bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -2823,6 +2865,28 @@ export default function App() {
                     </div>
                   </div>
                 </SettingsAccordion>
+
+                {deferredPrompt && (
+                  <SettingsAccordion 
+                    title="Instalar App" 
+                    icon={<Download size={20} />}
+                    isOpen={openedAccordion === 'install'}
+                    onToggle={() => setOpenedAccordion(openedAccordion === 'install' ? null : 'install')}
+                  >
+                    <div className="space-y-4 text-left">
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Instale o Luko na sua tela de início para acesso rápido e melhor experiência.
+                      </p>
+                      <button 
+                        onClick={handleInstallClick}
+                        className="w-full py-4 bg-primary text-on-primary font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 active:scale-95 transition-transform"
+                      >
+                        <Download size={20} />
+                        Instalar Agora
+                      </button>
+                    </div>
+                  </SettingsAccordion>
+                )}
               </div>
 
               <div className="px-4 pt-4">
@@ -3541,6 +3605,7 @@ export default function App() {
     }
   };
 
+  console.log("App Rendering. isAuthReady:", isAuthReady);
   return (
     <ErrorBoundary>
       <GlobalErrorUI>
