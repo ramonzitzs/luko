@@ -830,12 +830,15 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
 
 const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skipAnimation }: { transactions: Transaction[], settings: UserSettings, userName?: string, onChatComplete?: (finished: boolean) => void, skipAnimation?: boolean }) => {
   const [prediction, setPrediction] = useState<string>(() => {
-    // Initial state from cache to avoid flicker if valid
-    const cached = localStorage.getItem('luko_prediction_v3');
-    const cachedTime = localStorage.getItem('luko_oracle_time_v3');
-    const now = new Date().getTime();
-    if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
-      return cached;
+    try {
+      const cached = localStorage.getItem('luko_prediction_v3');
+      const cachedTime = localStorage.getItem('luko_oracle_time_v3');
+      const now = new Date().getTime();
+      if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
+        return cached;
+      }
+    } catch (e) {
+      console.warn('LocalStorage not available');
     }
     return '';
   });
@@ -878,9 +881,17 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
 
         // Create a signature of the current financial state
         const currentSignature = `${totalIncome}-${totalExpenses}-${limit}`;
-        const cachedSignature = localStorage.getItem('luko_data_signature_v3');
-        const cachedTime = localStorage.getItem('luko_oracle_time_v3');
-        const cachedPrediction = localStorage.getItem('luko_prediction_v3');
+        let cachedSignature = null;
+        let cachedTime = null;
+        let cachedPrediction = null;
+
+        try {
+          cachedSignature = localStorage.getItem('luko_data_signature_v3');
+          cachedTime = localStorage.getItem('luko_oracle_time_v3');
+          cachedPrediction = localStorage.getItem('luko_prediction_v3');
+        } catch (e) {
+          console.warn('LocalStorage not available');
+        }
 
         // If we have a valid cache AND the data hasn't changed, don't re-fetch
         if (
@@ -922,9 +933,13 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
         const newPrediction = response.text || 'Lukinho está sem palavras para sua conta bancária.';
         
         setPrediction(newPrediction);
-        localStorage.setItem('luko_prediction_v3', newPrediction);
-        localStorage.setItem('luko_oracle_time_v3', now.toString());
-        localStorage.setItem('luko_data_signature_v3', currentSignature);
+        try {
+          localStorage.setItem('luko_prediction_v3', newPrediction);
+          localStorage.setItem('luko_oracle_time_v3', now.toString());
+          localStorage.setItem('luko_data_signature_v3', currentSignature);
+        } catch (e) {
+          console.warn('LocalStorage not available');
+        }
       } catch (error) {
         console.error('Lukinho Error:', error);
         if (!prediction) {
@@ -1034,7 +1049,6 @@ export default function App() {
     privacyMode: false,
     readNotificationIds: [] 
   });
-  const [showInstallModal, setShowInstallModal] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [openedAccordion, setOpenedAccordion] = useState<string | null>(null);
@@ -1053,12 +1067,8 @@ export default function App() {
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
-      e.preventDefault();
+      // Don't prevent default, let the browser handle it if it wants
       setDeferredPrompt(e);
-      // Show custom install modal automatically if not already installed
-      if (!window.matchMedia('(display-mode: standalone)').matches) {
-        setShowInstallModal(true);
-      }
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -1081,13 +1091,6 @@ export default function App() {
       setDeferredPrompt(null);
     }
   };
-
-  useEffect(() => {
-    window.scrollTo(0, 0);
-    if (activeTab === 'goals' && !hasVisitedLukinho) {
-      setHasVisitedLukinho(true);
-    }
-  }, [activeTab, hasVisitedLukinho]);
 
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -1869,57 +1872,6 @@ export default function App() {
     }
   }, [notifications, settings.pushNotifications, settings.readNotificationIds, pushedNotificationIds]);
 
-  const [showSplash, setShowSplash] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 3500); // Duration of the splash screen
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (showSplash) {
-    return (
-      <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 1.1 }}
-          className="relative z-10"
-        >
-          <div className="w-48 h-48 flex items-center justify-center mx-auto mb-10 overflow-hidden">
-            <motion.img 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              src="https://lh3.googleusercontent.com/d/1caF8UPYKEXFJ0qyEmPhO92-KTi4JnpdP" 
-              className="w-full h-auto object-contain"
-              referrerPolicy="no-referrer"
-              onLoad={() => {
-                setTimeout(() => setShowSplash(false), 3000);
-              }}
-              onError={() => {
-                console.error("Splash logo failed to load");
-                setShowSplash(false);
-              }}
-              alt="Luko Logo"
-            />
-          </div>
-          <div className="mt-8 flex justify-center gap-2">
-            {[0, 1, 2].map(i => (
-              <motion.div 
-                key={i}
-                animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
-                transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                className="w-2 h-2 bg-[#0F111A] rounded-full"
-              />
-            ))}
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
   if (!isAuthReady) {
     return (
       <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
@@ -1937,7 +1889,8 @@ export default function App() {
   };
 
   const renderContent = () => {
-    if (!user) {
+    try {
+      if (!user) {
       return (
         <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
           <motion.div 
@@ -2469,7 +2422,11 @@ export default function App() {
                 animate={{ opacity: 1 }} 
                 className="max-w-md mx-auto"
                 onViewportEnter={() => {
-                  localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
+                  try {
+                    localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
+                  } catch (e) {
+                    console.warn('LocalStorage not available');
+                  }
                 }}
               >
                 <LukinhoSincero 
@@ -3562,50 +3519,23 @@ export default function App() {
               </motion.div>
             </div>
           )}
-          {showInstallModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }} 
-                onClick={() => setShowInstallModal(false)} 
-                className="absolute inset-0 bg-black/80 backdrop-blur-md" 
-              />
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                className="bg-[#1C1F2B] w-full max-w-sm rounded-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50 text-center"
-              >
-                <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center mx-auto mb-6 shadow-xl shadow-primary/20">
-                  <Download className="text-on-primary" size={40} />
-                </div>
-                <h2 className="text-2xl font-bold mb-2">Instalar Luko</h2>
-                <p className="text-slate-400 mb-8 text-sm leading-relaxed">
-                  Adicione o Luko à sua tela de início para ter acesso rápido e uma experiência completa de aplicativo.
-                </p>
-                <div className="space-y-3">
-                  <button 
-                    onClick={() => {
-                      handleInstallClick();
-                      setShowInstallModal(false);
-                    }}
-                    className="w-full py-4 bg-primary text-on-primary font-bold rounded-2xl shadow-lg shadow-primary/20 active:scale-95 transition-transform"
-                  >
-                    Instalar Agora
-                  </button>
-                  <button 
-                    onClick={() => setShowInstallModal(false)}
-                    className="w-full py-4 bg-white/5 text-slate-400 font-bold rounded-2xl active:scale-95 transition-transform"
-                  >
-                    Agora não
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
         </AnimatePresence>
       </div>
     );
+    } catch (error) {
+      console.error("Render error:", error);
+      return (
+        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+          <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
+            <p className="text-slate-400 text-sm mb-6">Ocorreu um erro ao renderizar o aplicativo.</p>
+            <button onClick={() => window.location.reload()} className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl">
+              Recarregar
+            </button>
+          </div>
+        </div>
+      );
+    }
   };
 
   return (
