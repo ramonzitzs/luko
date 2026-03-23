@@ -42,14 +42,12 @@ import {
   ChevronUp,
   ChevronLeft,
   AlertCircle,
-  Download,
   PieChart as PieChartIcon,
   Users,
   Heart,
   Share2,
   TrendingUp
 } from 'lucide-react';
-import { motion, AnimatePresence, useMotionValue, useTransform, Reorder } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -426,8 +424,6 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 // --- Components ---
 
 const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string) => Promise<void> | void, privacyMode?: boolean, onClick?: () => void }> = ({ t, deleteTransaction, privacyMode, onClick }) => {
-  const x = useMotionValue(0);
-  const opacity = useTransform(x, [-60, -20, 0], [1, 0.5, 0]);
   const [showConfirm, setShowConfirm] = useState(false);
 
   const handleDelete = async () => {
@@ -437,57 +433,33 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
 
   return (
     <div className="relative overflow-hidden rounded-[20px]">
-      <AnimatePresence>
-        {showConfirm && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-20 bg-[#1C1F2B]/95 backdrop-blur-sm flex items-center justify-between px-6"
-          >
-            <p className="text-xs font-bold text-white uppercase tracking-widest">Excluir?</p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => {
-                  setShowConfirm(false);
-                  x.set(0);
-                }}
-                className="px-4 py-2 bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
-              >
-                Não
-              </button>
-              <button 
-                onClick={handleDelete}
-                className="px-4 py-2 bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-500/20 active:scale-95 transition-transform"
-              >
-                Sim
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {showConfirm && (
+        <div 
+          className="absolute inset-0 z-20 bg-[#1C1F2B]/95 backdrop-blur-sm flex items-center justify-between px-6"
+        >
+          <p className="text-xs font-bold text-white uppercase tracking-widest">Excluir?</p>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => {
+                setShowConfirm(false);
+              }}
+              className="px-4 py-2 bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
+            >
+              Não
+            </button>
+            <button 
+              onClick={handleDelete}
+              className="px-4 py-2 bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-500/20 active:scale-95 transition-transform"
+            >
+              Sim
+            </button>
+          </div>
+        </div>
+      )}
 
-      <motion.div 
-        style={{ opacity }}
-        className="absolute inset-0 bg-rose-600 flex items-center justify-end px-6 text-white"
-      >
-        <Trash2 size={20} />
-      </motion.div>
-      <motion.div 
-        drag="x"
-        style={{ x }}
-        dragConstraints={{ left: -100, right: 0 }}
-        dragElastic={0.1}
-        onDragEnd={() => {
-          if (x.get() < -60) {
-            setShowConfirm(true);
-          } else {
-            x.set(0);
-          }
-        }}
+      <div 
         onClick={onClick}
-        whileDrag={{ scale: 1.02 }}
-        className="bg-[#1C1F2B] p-4 rounded-[20px] flex items-center justify-between border border-slate-800/50 relative z-10 cursor-grab active:cursor-grabbing group"
+        className="bg-[#1C1F2B] p-4 rounded-[20px] flex items-center justify-between border border-slate-800/50 relative z-10 group active:bg-[#252a3a] transition-colors"
       >
         <div className="flex items-center gap-4 min-w-0 flex-1">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${CATEGORIES[t.category]?.color || 'bg-slate-800 text-slate-400'}`}>
@@ -505,19 +477,30 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
             </div>
           </div>
         </div>
-        <div className="text-right ml-4 flex-shrink-0">
-          <div className="flex flex-col items-end">
-            <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
-              {t.type === 'income' ? '+' : '-'} {privacyMode ? '••••••' : formatCurrency(t.amount)}
-            </p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <p className="text-[10px] font-bold text-slate-500">
-                {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : ''}
+        <div className="flex items-center gap-3">
+          <div className="text-right flex-shrink-0">
+            <div className="flex flex-col items-end">
+              <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
+                {t.type === 'income' ? '+' : '-'} {privacyMode ? '••••••' : formatCurrency(t.amount)}
               </p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <p className="text-[10px] font-bold text-slate-500">
+                  {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : ''}
+                </p>
+              </div>
             </div>
           </div>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowConfirm(true);
+            }}
+            className="p-2 text-slate-600 hover:text-rose-500 transition-colors"
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
@@ -527,32 +510,11 @@ const NotificationItem: React.FC<{
   onRead: (id: string) => void, 
   onClick: () => void
 }> = ({ n, onRead, onClick }) => {
-  const x = useMotionValue(0);
-  const opacity = useTransform(x, [-60, -20, 0], [1, 0.5, 0]);
-
   return (
     <div className="relative overflow-hidden rounded-2xl">
-      <motion.div 
-        style={{ opacity }}
-        className="absolute inset-0 bg-rose-600 flex items-center justify-end px-6 text-white"
-      >
-        <Trash2 size={20} />
-      </motion.div>
-      <motion.div 
-        drag="x"
-        style={{ x }}
-        dragConstraints={{ left: -100, right: 0 }}
-        dragElastic={0.1}
-        onDragEnd={() => {
-          if (x.get() < -60) {
-            onRead(n.id);
-          } else {
-            x.set(0);
-          }
-        }}
+      <div 
         onClick={onClick}
-        whileDrag={{ scale: 1.02 }}
-        className="bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50 flex items-center gap-4 relative z-10 cursor-grab active:cursor-grabbing group transition-transform"
+        className="bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50 flex items-center gap-4 relative z-10 group transition-colors active:bg-[#1C1F2B]"
       >
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${
           n.type === 'warning' ? 'bg-rose-500/10 text-rose-500' : 'bg-primary/10 text-primary'
@@ -563,10 +525,16 @@ const NotificationItem: React.FC<{
           <h4 className="font-bold text-sm truncate">{n.title}</h4>
           <p className="text-xs text-slate-400 mt-1 truncate">{n.message}</p>
         </div>
-        <div className="absolute right-4 opacity-10">
-          <ChevronRight size={20} />
-        </div>
-      </motion.div>
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onRead(n.id);
+          }}
+          className="p-2 text-slate-600 hover:text-primary transition-colors"
+        >
+          <Check size={18} />
+        </button>
+      </div>
     </div>
   );
 };
@@ -649,11 +617,7 @@ const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnim
   if (!visible) return null;
 
   return (
-    <motion.div 
-      initial={skipAnimation ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={`flex items-start gap-5 ${isLast ? '' : 'mb-10'}`}
-    >
+    <div className={`flex items-start gap-5 ${isLast ? '' : 'mb-10'}`}>
       <div className="flex-shrink-0 mt-1">
         <img 
           src={avatar} 
@@ -674,7 +638,7 @@ const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnim
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 };
 
@@ -801,11 +765,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
   const avatar = "https://tidas.com.br/arquivos/avatar_chat.png";
 
   return (
-    <motion.div 
-      initial={skipAnimation ? { opacity: 1 } : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="pt-[65px] pb-[65px] px-2"
-    >
+    <div className="pt-[65px] pb-[65px] px-2">
       <ChatMessage 
         avatar={avatar}
         delay={0}
@@ -828,7 +788,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
         onComplete={() => onComplete?.(true)}
         skipAnimation={skipAnimation}
       />
-    </motion.div>
+    </div>
   );
 };
 
@@ -847,19 +807,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
     return '';
   });
   const [loading, setLoading] = useState(!prediction);
-  const [isVideoLoaded, setIsVideoLoaded] = useState(skipAnimation);
-
-  useEffect(() => {
-    if (skipAnimation) {
-      setIsVideoLoaded(true);
-      return;
-    }
-    // Fallback: if video takes too long to load, show content anyway
-    const timer = setTimeout(() => {
-      setIsVideoLoaded(true);
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [skipAnimation]);
+  const [isVideoLoaded, setIsVideoLoaded] = useState(true); // Default to true for better mobile stability
 
   useEffect(() => {
     const generatePrediction = async () => {
@@ -967,59 +915,31 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
   }, [isReady, skipAnimation]);
 
   return (
-    <div className="min-h-[300px] flex flex-col justify-center relative">
-      {/* Hidden video to trigger loading */}
-      {!isVideoLoaded && (
-        <video 
-          src="https://tidas.com.br/arquivos/avatar.mp4" 
-          onLoadedData={() => setIsVideoLoaded(true)}
-          className="absolute opacity-0 pointer-events-none"
-          muted={true}
-          playsInline
-        />
-      )}
-
-      <AnimatePresence mode="wait">
-        {!isReady ? (
-          <motion.div 
-            key="loading"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center justify-center py-12"
-          >
-            <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
-            <p className="text-slate-400 text-sm font-medium animate-pulse">Carregando Lukinho sincero...</p>
-          </motion.div>
-        ) : (
-          <motion.div 
-            key="content"
-            initial={skipAnimation ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.98, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-          >
-            <div className="overflow-hidden relative group rounded-t-[32px]">
-              <video 
-                src="https://tidas.com.br/arquivos/avatar.mp4" 
-                autoPlay 
-                loop 
-                muted={true}
-                onCanPlay={(e) => e.currentTarget.muted = true}
-                playsInline
-                className="w-full h-auto object-contain"
-              />
-            </div>
-            
-            <motion.div 
-              initial={skipAnimation ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: skipAnimation ? 0 : 0.2 }}
-              className="bg-[#cdfc54] p-8 rounded-[32px] text-[#0f111a] shadow-[0_0_40px_rgba(205,252,84,0.35)] relative z-10 -mt-2"
-            >
-              <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
-                <TypingText text={prediction} skipAnimation={skipAnimation} />
-              </p>
-            </motion.div>
+    <div className="min-h-[200px] flex flex-col justify-center relative">
+      {!isReady ? (
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
+          <p className="text-slate-400 text-sm font-medium animate-pulse">Carregando Lukinho sincero...</p>
+        </div>
+      ) : (
+        <div>
+          <div className="overflow-hidden relative group rounded-t-[32px]">
+            <video 
+              src="https://tidas.com.br/arquivos/avatar.mp4" 
+              autoPlay 
+              loop 
+              muted={true}
+              onCanPlay={(e) => e.currentTarget.muted = true}
+              playsInline
+              className="w-full h-auto object-contain"
+            />
+          </div>
+          
+          <div className="bg-[#cdfc54] p-8 rounded-[32px] text-[#0f111a] shadow-[0_0_40px_rgba(205,252,84,0.35)] relative z-10 -mt-2">
+            <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
+              <TypingText text={prediction} skipAnimation={skipAnimation} />
+            </p>
+          </div>
 
             <LukinhoChat 
               transactions={transactions} 
@@ -1030,9 +950,8 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
               onComplete={onChatComplete}
               skipAnimation={skipAnimation}
             />
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+      )}
     </div>
   );
 };
@@ -1061,55 +980,23 @@ export default function App() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [pixShareData, setPixShareData] = useState<{ amountPerPerson: number, pixKey: string } | null>(null);
   const [isEditingPixKey, setIsEditingPixKey] = useState(false);
   const [chatFinished, setChatFinished] = useState(false);
   const [hasVisitedLukinho, setHasVisitedLukinho] = useState(false);
   const [isAnyModalOpen, setIsAnyModalOpen] = useState(false);
   const [pushedNotificationIds, setPushedNotificationIds] = useState<Set<string>>(new Set());
-  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
     console.log("Auth State Change:", { isAuthReady, user: !!user, uid: user?.uid });
   }, [isAuthReady, user]);
 
   useEffect(() => {
-    const checkStandalone = () => {
-      const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone || document.referrer.includes('android-app://');
-      setIsStandalone(isStandaloneMode);
-      console.log("Is Standalone:", isStandaloneMode);
-    };
-    checkStandalone();
-  }, []);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: any) => {
-      console.log("beforeinstallprompt event fired");
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    
     // Request geolocation permission on first load
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(() => {}, () => {});
     }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
   }, []);
-
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-    }
-  };
 
   const [selectedHistoryCategory, setSelectedHistoryCategory] = useState<string>('Todas');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -1199,11 +1086,25 @@ export default function App() {
     );
     
     const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
-      const transData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        date: (doc.data().date as Timestamp).toDate()
-      })) as Transaction[];
+      const transData = snapshot.docs.map(doc => {
+        const data = doc.data();
+        let date: Date;
+        if (data.date instanceof Timestamp) {
+          date = data.date.toDate();
+        } else if (data.date && typeof data.date === 'string') {
+          date = new Date(data.date);
+        } else if (data.date && typeof data.date.toDate === 'function') {
+          date = data.date.toDate();
+        } else {
+          date = new Date();
+        }
+        
+        return {
+          id: doc.id,
+          ...data,
+          date
+        };
+      }) as Transaction[];
       setTransactions(transData);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
 
@@ -1834,7 +1735,8 @@ export default function App() {
     tomorrow.setDate(today.getDate() + 1);
 
     // Check due dates for all unpaid expenses that are considered "bills" (recurring or installments)
-    transactions.forEach(t => {
+    (transactions || []).forEach(t => {
+      if (!t) return;
       if (t.type === 'expense' && !t.isPaid && !t.cardId) {
         const isBill = t.isRecurring || (t.installmentsCount && t.installmentsCount > 1);
         if (!isBill) return;
@@ -1934,10 +1836,8 @@ export default function App() {
     if (!isAuthReady) {
       return (
         <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center">
-          <motion.div 
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-            className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full"
+          <div 
+            className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
           />
         </div>
       );
@@ -1948,9 +1848,7 @@ export default function App() {
         console.log("Rendering Login Screen");
         return (
           <div className="min-h-[100dvh] bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
-          <motion.div 
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
+          <div 
             className="max-w-sm w-full relative z-10"
           >
             <div className="mb-16">
@@ -1978,7 +1876,7 @@ export default function App() {
                 Entrar com Google
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       );
     }
@@ -2002,23 +1900,6 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {!isStandalone && (
-                <button 
-                  onClick={() => {
-                    if (deferredPrompt) {
-                      deferredPrompt.prompt();
-                    } else if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                      alert('Para instalar no iOS: toque no botão de Compartilhar e selecione "Adicionar à Tela de Início".');
-                    } else {
-                      alert('Use o menu do navegador para instalar o app.');
-                    }
-                  }}
-                  className="p-2 text-primary hover:text-primary/80 transition-colors flex items-center justify-center"
-                  title="Instalar App"
-                >
-                  <Download size={20} />
-                </button>
-              )}
               <button 
                 onClick={() => updateSettings({ privacyMode: !settings.privacyMode })}
                 className="p-2 text-slate-400 hover:text-white transition-colors flex items-center justify-center"
@@ -2066,7 +1947,7 @@ export default function App() {
         <main className="px-6 max-w-md mx-auto space-y-6">
           
           {activeTab === 'dashboard' && (
-            <motion.div initial={{ opacity: 1 }} animate={{ opacity: 1 }} className="space-y-8">
+            <div className="space-y-8">
               {console.log("Dashboard Render Start. Cards:", cards.length, "Transactions:", transactions.length)}
               {(() => {
                 try {
@@ -2083,15 +1964,16 @@ export default function App() {
                   
                   {cards.find(c => c.id === selectedCardId) && (() => {
                     const card = cards.find(c => c.id === selectedCardId)!;
-                    const cardSpend = transactions
+                    const cardSpend = (transactions || [])
                       .filter(t => {
+                        if (!t) return false;
                         const tDate = new Date(t.date);
                         return t.cardId === card.id && 
                                t.type === 'expense' && 
                                tDate.getMonth() === selectedMonth.getMonth() && 
                                tDate.getFullYear() === selectedMonth.getFullYear();
                       })
-                      .reduce((acc, t) => acc + t.amount, 0);
+                      .reduce((acc, t) => acc + (t.amount || 0), 0);
 
                     return (
                       <div className={`${card.color === 'bg-slate-800' ? 'bg-[#1C1F2B] border border-slate-800' : card.color} rounded-[32px] p-8 text-white shadow-lg relative overflow-hidden min-h-[200px] flex flex-col justify-between`}>
@@ -2121,9 +2003,8 @@ export default function App() {
                           </div>
 
                           <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${Math.min(100, (card.currentSpend / card.limit) * 100)}%` }}
+                            <div 
+                              style={{ width: `${Math.min(100, (card.currentSpend / card.limit) * 100)}%` }}
                               className="h-full bg-white rounded-full"
                             />
                           </div>
@@ -2138,40 +2019,40 @@ export default function App() {
 
                   <section>
                     <h3 className="font-bold text-lg mb-4">Transações no Cartão</h3>
-                    <div className="space-y-3">
-                      {transactions.filter(t => {
-                        const tDate = new Date(t.date);
-                        return t.cardId === selectedCardId && 
-                               tDate.getMonth() === selectedMonth.getMonth() && 
-                               tDate.getFullYear() === selectedMonth.getFullYear();
-                      }).length === 0 ? (
-                        <p className="text-center text-slate-500 py-8">Nenhuma transação este mês.</p>
-                      ) : (
-                        <AnimatePresence mode="popLayout">
-                          {transactions.filter(t => {
-                            const tDate = new Date(t.date);
-                            return t.cardId === selectedCardId && 
-                                   tDate.getMonth() === selectedMonth.getMonth() && 
-                                   tDate.getFullYear() === selectedMonth.getFullYear();
-                          }).map(t => (
-                            <TransactionItem 
-                              key={t.id} 
-                              t={t} 
-                              deleteTransaction={deleteTransaction} 
-                              privacyMode={settings.privacyMode} 
-                              onClick={() => setSelectedTransaction(t)}
-                            />
-                          ))}
-                        </AnimatePresence>
-                      )}
-                    </div>
+                      <div className="space-y-3">
+                        {(transactions || []).filter(t => {
+                          if (!t) return false;
+                          const tDate = new Date(t.date);
+                          return t.cardId === selectedCardId && 
+                                 tDate.getMonth() === selectedMonth.getMonth() && 
+                                 tDate.getFullYear() === selectedMonth.getFullYear();
+                        }).length === 0 ? (
+                          <p className="text-center text-slate-500 py-8">Nenhuma transação este mês.</p>
+                        ) : (
+                          <>
+                            {(transactions || []).filter(t => {
+                              if (!t) return false;
+                              const tDate = new Date(t.date);
+                              return t.cardId === selectedCardId && 
+                                     tDate.getMonth() === selectedMonth.getMonth() && 
+                                     tDate.getFullYear() === selectedMonth.getFullYear();
+                            }).map(t => (
+                              <TransactionItem 
+                                key={t.id} 
+                                t={t} 
+                                deleteTransaction={deleteTransaction} 
+                                privacyMode={settings.privacyMode} 
+                                onClick={() => setSelectedTransaction(t)}
+                              />
+                            ))}
+                          </>
+                        )}
+                      </div>
                   </section>
                 </div>
               ) : (
                 <>
-                  <motion.div 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
+                  <div 
                     className="bg-primary rounded-[32px] p-6 text-on-primary shadow-2xl shadow-primary/20 relative overflow-hidden"
                   >
                     <div className="relative z-10">
@@ -2184,10 +2065,9 @@ export default function App() {
                       
                       <div className="space-y-3">
                         <div className="h-2.5 bg-[#0F111A]/20 rounded-full overflow-hidden">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, stats.progress)}%` }}
-                            className="h-full bg-[#0F111A] rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)]"
+                          <div 
+                            style={{ width: `${Math.min(100, stats.progress)}%` }}
+                            className="h-full bg-[#0F111A] rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000"
                           />
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-on-primary/60 font-medium">
@@ -2202,17 +2082,15 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
 
                   <section>
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="font-bold text-lg">Meus Cartões</h3>
                     </div>
                     <div className="overflow-hidden -mx-6 px-6">
-                      <motion.div 
-                        drag="x"
-                        dragConstraints={{ right: 0, left: cards.length > 1 ? -((cards.length * 296) - (Math.min(window.innerWidth, 448) - 48)) : 0 }}
-                        className="flex gap-4 cursor-grab active:cursor-grabbing"
+                      <div 
+                        className="flex gap-4 overflow-x-auto no-scrollbar pb-4"
                       >
                         {cards.length === 0 ? (
                           <div className="bg-[#1C1F2B] border-2 border-dashed border-slate-800 rounded-[24px] p-6 w-full text-center text-slate-500">
@@ -2220,9 +2098,9 @@ export default function App() {
                           </div>
                         ) : (
                           cards.map(card => (
-                            <motion.div 
+                            <div 
                               key={card.id} 
-                              onTap={() => setSelectedCardId(card.id)}
+                              onClick={() => setSelectedCardId(card.id)}
                               className={`${card.color === 'bg-slate-800' ? 'bg-[#1C1F2B] border border-slate-800' : card.color} min-w-[280px] max-w-[280px] rounded-[28px] p-6 text-white shadow-lg relative overflow-hidden flex-shrink-0 h-44 active:scale-[0.98] transition-transform`}
                             >
                               <div className="relative z-10 h-full flex flex-col justify-between pointer-events-none">
@@ -2261,10 +2139,10 @@ export default function App() {
                                   </div>
                                 </div>
                               </div>
-                            </motion.div>
+                            </div>
                           ))
                         )}
-                      </motion.div>
+                      </div>
                     </div>
                   </section>
 
@@ -2277,16 +2155,11 @@ export default function App() {
                         </h3>
                       </div>
                       <div className="space-y-3">
-                        <AnimatePresence mode="popLayout">
-                          {billsDueThisWeek.map((t) => (
-                            <motion.div 
-                              key={t.id}
-                              layout
-                              initial={{ opacity: 0, scale: 0.95 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              exit={{ opacity: 0, scale: 0.9, x: -20 }}
-                              className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-[#1C1F2B] border-slate-800/50'} border rounded-[20px] p-4 flex items-center justify-between active:scale-[0.98] transition-transform`}
-                            >
+                        {billsDueThisWeek.map((t) => (
+                          <div 
+                            key={t.id}
+                            className={`${t.isOverdue ? 'bg-rose-500/10 border-rose-500/30' : 'bg-[#1C1F2B] border-slate-800/50'} border rounded-[20px] p-4 flex items-center justify-between active:scale-[0.98] transition-transform`}
+                          >
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <div className={`w-10 h-10 flex-shrink-0 ${t.isOverdue ? 'bg-rose-500/20 text-rose-500' : 'bg-slate-800 text-slate-400'} rounded-xl flex items-center justify-center`}>
                                   {getInteractiveIcon(t.title, t.category)}
@@ -2312,10 +2185,9 @@ export default function App() {
                                   PAGAR
                                 </button>
                               </div>
-                            </motion.div>
+                            </div>
                           ))}
-                        </AnimatePresence>
-                      </div>
+                        </div>
                     </section>
                   )}
 
@@ -2333,17 +2205,15 @@ export default function App() {
                     </div>
                     <div className="relative">
                       <div className="space-y-3 pb-6">
-                        <AnimatePresence mode="popLayout">
-                          {filteredTransactions.slice(0, 5).map((t) => (
-                            <TransactionItem 
-                              key={t.id} 
-                              t={t} 
-                              deleteTransaction={deleteTransaction} 
-                              privacyMode={settings.privacyMode} 
-                              onClick={() => setSelectedTransaction(t)}
-                            />
-                          ))}
-                        </AnimatePresence>
+                        {filteredTransactions.slice(0, 5).map((t) => (
+                          <TransactionItem 
+                            key={t.id} 
+                            t={t} 
+                            deleteTransaction={deleteTransaction} 
+                            privacyMode={settings.privacyMode} 
+                            onClick={() => setSelectedTransaction(t)}
+                          />
+                        ))}
                       </div>
                       {filteredTransactions.length > 0 && futureTransactions.length === 0 && (
                         <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
@@ -2366,17 +2236,15 @@ export default function App() {
                       </div>
                       <div className="relative">
                         <div className="space-y-3 pb-6">
-                          <AnimatePresence mode="popLayout">
-                            {futureTransactions.slice(0, 5).map((t) => (
-                              <TransactionItem 
-                                key={t.id} 
-                                t={t} 
-                                deleteTransaction={deleteTransaction} 
-                                privacyMode={settings.privacyMode} 
-                                onClick={() => setSelectedTransaction(t)}
-                              />
-                            ))}
-                          </AnimatePresence>
+                          {futureTransactions.slice(0, 5).map((t) => (
+                            <TransactionItem 
+                              key={t.id} 
+                              t={t} 
+                              deleteTransaction={deleteTransaction} 
+                              privacyMode={settings.privacyMode} 
+                              onClick={() => setSelectedTransaction(t)}
+                            />
+                          ))}
                         </div>
                         {futureTransactions.length > 0 && (
                           <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
@@ -2393,11 +2261,11 @@ export default function App() {
           return <div className="p-6 bg-rose-500/10 text-rose-500 rounded-2xl">Erro ao carregar o dashboard.</div>;
         }
       })()}
-            </motion.div>
+            </div>
           )}
 
           {activeTab === 'history' && (
-            <motion.div initial={{ opacity: 1 }} animate={{ opacity: 1 }} className="space-y-4">
+            <div className="space-y-4">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold">Extrato {selectedMonth.toLocaleDateString('pt-BR', { month: 'long' }).charAt(0).toUpperCase() + selectedMonth.toLocaleDateString('pt-BR', { month: 'long' }).slice(1)}</h2>
                 <select 
@@ -2436,17 +2304,15 @@ export default function App() {
                   return (
                     <>
                       <div className="space-y-3">
-                        <AnimatePresence mode="popLayout">
-                          {displayedTransactions.map((t) => (
-                            <TransactionItem 
-                              key={t.id} 
-                              t={t} 
-                              deleteTransaction={deleteTransaction} 
-                              privacyMode={settings.privacyMode} 
-                              onClick={() => setSelectedTransaction(t)}
-                            />
-                          ))}
-                        </AnimatePresence>
+                        {displayedTransactions.map((t) => (
+                          <TransactionItem 
+                            key={t.id} 
+                            t={t} 
+                            deleteTransaction={deleteTransaction} 
+                            privacyMode={settings.privacyMode} 
+                            onClick={() => setSelectedTransaction(t)}
+                          />
+                        ))}
                       </div>
 
                       {/* Summary at the end of the list */}
@@ -2484,7 +2350,7 @@ export default function App() {
                                   {selectedHistoryCategory === 'Futuros' ? 'Total Futuro' : `Total em ${selectedHistoryCategory}`}
                                 </p>
                                 <p className="text-2xl font-black text-white">
-                                  {formatCurrency(displayedTransactions.reduce((acc, curr) => acc + curr.amount, 0))}
+                                  {formatCurrency((displayedTransactions || []).reduce((acc, curr) => acc + (curr.amount || 0), 0))}
                                 </p>
                               </div>
                             </div>
@@ -2495,43 +2361,28 @@ export default function App() {
                   );
                 })()}
               </div>
-            </motion.div>
+            </div>
           )}
 
-          {hasVisitedLukinho && (
-            <div style={{ display: activeTab === 'goals' ? 'block' : 'none' }}>
-              <motion.div 
-                initial={{ opacity: 1 }} 
-                animate={{ opacity: 1 }} 
-                className="max-w-md mx-auto"
-                onViewportEnter={() => {
-                  try {
-                    localStorage.setItem('lastLukinhoVisit', new Date().toDateString());
-                  } catch (e) {
-                    console.warn('LocalStorage not available');
-                  }
-                }}
-              >
-                <LukinhoSincero 
-                  transactions={transactions} 
-                  settings={settings} 
-                  userName={user?.displayName?.split(' ')[0]} 
-                  onChatComplete={(finished) => setChatFinished(finished)}
-                  skipAnimation={chatFinished}
-                />
+            {hasVisitedLukinho && (
+              <div style={{ display: activeTab === 'goals' ? 'block' : 'none' }}>
+                <div className="max-w-md mx-auto">
+                  <LukinhoSincero 
+                    transactions={transactions} 
+                    settings={settings} 
+                    userName={user?.displayName?.split(' ')[0]} 
+                    onChatComplete={(finished) => setChatFinished(finished)}
+                    skipAnimation={chatFinished}
+                  />
 
-              {chatFinished && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6 }}
-                >
-                  {(() => {
-                    const currentMonthExpenses = transactions.filter(t => 
-                      t.type === 'expense' && 
-                      new Date(t.date).getMonth() === selectedMonth.getMonth() &&
-                      new Date(t.date).getFullYear() === selectedMonth.getFullYear()
-                    );
+                {chatFinished && (
+                  <div className="mt-6">
+                    {(() => {
+                      const currentMonthExpenses = (transactions || []).filter(t => 
+                        t && t.type === 'expense' && 
+                        new Date(t.date).getMonth() === selectedMonth.getMonth() &&
+                        new Date(t.date).getFullYear() === selectedMonth.getFullYear()
+                      );
 
                     const categories: { [key: string]: number } = {};
                     currentMonthExpenses.forEach(t => {
@@ -2607,18 +2458,14 @@ export default function App() {
                       </>
                     );
                   })()}
-                </motion.div>
+                </div>
               )}
-            </motion.div>
+            </div>
           </div>
-          )}
+        )}
 
           {activeTab === 'more' && (
-            <motion.div 
-              initial={{ opacity: 1, y: 0 }} 
-              animate={{ opacity: 1, y: 0 }} 
-              className="space-y-4 pb-12"
-            >
+            <div className="space-y-4 pb-12">
               <div className="bg-[#1C1F2B] rounded-[32px] overflow-hidden border border-slate-800/50">
                 <SettingsAccordion 
                   title="Minhas Rendas" 
@@ -2674,12 +2521,11 @@ export default function App() {
                   onToggle={() => setOpenedAccordion(openedAccordion === 'cards' ? null : 'cards')}
                 >
                   <div className="space-y-4">
-                    <Reorder.Group axis="y" values={cards} onReorder={updateCardsOrder} className="space-y-2">
+                    <div className="space-y-2">
                       {cards.map((card) => (
-                        <Reorder.Item 
+                        <div 
                           key={card.id} 
-                          value={card}
-                          className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 cursor-grab active:cursor-grabbing"
+                          className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5"
                         >
                           <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white`} style={{ backgroundColor: card.color }}>
@@ -2704,9 +2550,9 @@ export default function App() {
                               <Trash2 size={16} />
                             </button>
                           </div>
-                        </Reorder.Item>
+                        </div>
                       ))}
-                    </Reorder.Group>
+                    </div>
                     
                     <button 
                       onClick={() => setIsCardModalOpen(true)}
@@ -2853,9 +2699,8 @@ export default function App() {
                         }}
                         className={`w-12 h-6 rounded-full transition-colors relative ${settings.pushNotifications ? 'bg-primary' : 'bg-slate-700'}`}
                       >
-                        <motion.div 
-                          animate={{ x: settings.pushNotifications ? 26 : 4 }}
-                          className={`absolute top-1 w-4 h-4 rounded-full ${settings.pushNotifications ? 'bg-[#0F111A]' : 'bg-white'}`}
+                        <div 
+                          className={`absolute top-1 w-4 h-4 rounded-full transition-all duration-300 ${settings.pushNotifications ? 'bg-[#0F111A] translate-x-[26px]' : 'bg-white translate-x-[4px]'}`}
                         />
                       </button>
                     </div>
@@ -2904,41 +2749,20 @@ export default function App() {
                   </div>
                 </SettingsAccordion>
 
-                {deferredPrompt && (
-                  <SettingsAccordion 
-                    title="Instalar App" 
-                    icon={<Download size={20} />}
-                    isOpen={openedAccordion === 'install'}
-                    onToggle={() => setOpenedAccordion(openedAccordion === 'install' ? null : 'install')}
-                  >
-                    <div className="space-y-4 text-left">
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        Instale o Luko na sua tela de início para acesso rápido e melhor experiência.
-                      </p>
-                      <button 
-                        onClick={handleInstallClick}
-                        className="w-full py-4 bg-primary text-on-primary font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 active:scale-95 transition-transform"
-                      >
-                        <Download size={20} />
-                        Instalar Agora
-                      </button>
-                    </div>
-                  </SettingsAccordion>
-                )}
-              </div>
+            </div>
 
-              <div className="px-4 pt-4">
-                <button 
-                  onClick={handleLogout}
-                  className="w-full py-4 bg-rose-500/10 text-rose-500 font-bold rounded-2xl flex items-center justify-center gap-2 border border-rose-500/20 active:scale-95 transition-transform"
-                >
-                  <LogOut size={20} />
-                  Sair da conta
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </main>
+            <div className="px-4 pt-4">
+              <button 
+                onClick={handleLogout}
+                className="w-full py-4 bg-rose-500/10 text-rose-500 font-bold rounded-2xl flex items-center justify-center gap-2 border border-rose-500/20 active:scale-95 transition-transform"
+              >
+                <LogOut size={20} />
+                Sair da conta
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
 
         {/* Bottom Navigation */}
         <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-4 pb-6 z-40">
@@ -2967,15 +2791,14 @@ export default function App() {
         </nav>
 
         {/* Modals */}
-        <AnimatePresence>
-          {isModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-              <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="bg-[#1C1F2B] w-full sm:max-w-md sm:rounded-[32px] rounded-t-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">Nova Transação</h2>
-                  <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-800 rounded-full"><X size={20} /></button>
-                </div>
+        {isModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+            <div onClick={() => setIsModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div className="bg-[#1C1F2B] w-full sm:max-w-md sm:rounded-[32px] rounded-t-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold">Nova Transação</h2>
+                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-800 rounded-full"><X size={20} /></button>
+              </div>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const form = e.currentTarget;
@@ -3088,23 +2911,17 @@ export default function App() {
                     Salvar
                   </button>
                 </form>
-              </motion.div>
+              </div>
             </div>
           )}
 
           {pixShareData && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }}
+              <div 
                 onClick={() => setPixShareData(null)} 
                 className="absolute inset-0 bg-black/80 backdrop-blur-md" 
               />
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }} 
-                animate={{ scale: 1, opacity: 1 }} 
-                exit={{ scale: 0.9, opacity: 0 }}
+              <div 
                 className="bg-[#1C1F2B] w-full max-w-sm rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800 text-center"
               >
                 <div className="w-20 h-20 bg-emerald-500/10 rounded-3xl flex items-center justify-center text-emerald-500 mx-auto mb-6">
@@ -3140,14 +2957,14 @@ export default function App() {
                     Agora não
                   </button>
                 </div>
-              </motion.div>
+              </div>
             </div>
           )}
 
           {isCardModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsCardModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-              <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="bg-[#1C1F2B] w-full sm:max-w-md sm:rounded-[32px] rounded-t-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50">
+              <div onClick={() => setIsCardModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div className="bg-[#1C1F2B] w-full sm:max-w-md sm:rounded-[32px] rounded-t-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-xl font-bold">Novo Cartão</h2>
                   <button onClick={() => setIsCardModalOpen(false)} className="p-2 hover:bg-slate-800 rounded-full"><X size={20} /></button>
@@ -3182,18 +2999,14 @@ export default function App() {
                   </div>
                   <button type="submit" className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20 mt-4">Adicionar Cartão</button>
                 </form>
-              </motion.div>
+              </div>
             </div>
           )}
 
           {isNotificationOpen && (
             <div className="fixed inset-0 z-50 flex items-start justify-center">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsNotificationOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-              <motion.div 
-                initial={{ y: "-100%" }} 
-                animate={{ y: 0 }} 
-                exit={{ y: "-100%" }} 
-                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              <div onClick={() => setIsNotificationOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div 
                 className="bg-[#1C1F2B] w-full sm:max-w-md rounded-b-[32px] p-8 relative z-10 shadow-2xl border border-slate-800/50"
               >
                 <div className="flex justify-between items-center mb-6">
@@ -3228,26 +3041,18 @@ export default function App() {
                     ))
                   )}
                 </div>
-              </motion.div>
+              </div>
             </div>
           )}
-        </AnimatePresence>
 
         {/* Month Picker Modal */}
-        <AnimatePresence>
-          {isMonthPickerOpen && (
+        {isMonthPickerOpen && (
             <div className="fixed inset-0 z-[60] flex items-start justify-center px-0">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }}
+              <div 
                 onClick={() => setIsMonthPickerOpen(false)} 
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm" 
               />
-              <motion.div 
-                initial={{ y: -100, opacity: 0 }} 
-                animate={{ y: 0, opacity: 1 }} 
-                exit={{ y: -100, opacity: 0 }}
+              <div 
                 className="bg-[#1C1F2B] w-full max-w-md rounded-b-[32px] p-6 relative z-10 shadow-2xl border border-slate-800/50"
               >
                 <div className="flex justify-between items-center mb-6">
@@ -3293,26 +3098,18 @@ export default function App() {
                     <ChevronRight size={20} />
                   </button>
                 </div>
-              </motion.div>
+              </div>
             </div>
           )}
-        </AnimatePresence>
 
         {/* Transaction Detail Modal */}
-        <AnimatePresence>
-          {selectedTransaction && (
+        {selectedTransaction && (
             <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }}
+              <div 
                 onClick={() => setSelectedTransaction(null)} 
                 className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
               />
-              <motion.div 
-                initial={{ y: "100%", opacity: 0 }} 
-                animate={{ y: 0, opacity: 1 }} 
-                exit={{ y: "100%", opacity: 0 }}
+              <div 
                 className="bg-[#1C1F2B] w-full sm:max-w-md rounded-t-[40px] sm:rounded-[40px] p-6 pb-10 relative z-10 shadow-2xl border-t border-x border-slate-800 sm:border"
               >
                 <div className="w-12 h-1 bg-slate-800 rounded-full mx-auto mb-6 sm:hidden" />
@@ -3413,26 +3210,18 @@ export default function App() {
                     Fechar
                   </button>
                 </div>
-              </motion.div>
+              </div>
             </div>
           )}
-        </AnimatePresence>
 
         {/* Edit Transaction Modal */}
-        <AnimatePresence>
-          {editingTransaction && (
+        {editingTransaction && (
             <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }}
+              <div 
                 onClick={() => setEditingTransaction(null)} 
                 className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
               />
-              <motion.div 
-                initial={{ y: 100, opacity: 0 }} 
-                animate={{ y: 0, opacity: 1 }} 
-                exit={{ y: 100, opacity: 0 }}
+              <div 
                 className="bg-[#1C1F2B] w-full max-w-sm rounded-t-[40px] sm:rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
               >
                 <h3 className="text-xl font-black mb-6">Editar Transação</h3>
@@ -3475,26 +3264,18 @@ export default function App() {
                     Salvar
                   </button>
                 </div>
-              </motion.div>
+              </div>
             </div>
           )}
-        </AnimatePresence>
 
         {/* Edit Card Modal */}
-        <AnimatePresence>
-          {editingCard && (
+        {editingCard && (
             <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }}
+              <div 
                 onClick={() => setEditingCard(null)} 
                 className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
               />
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }} 
-                animate={{ scale: 1, opacity: 1 }} 
-                exit={{ scale: 0.9, opacity: 0 }}
+              <div 
                 className="bg-[#1C1F2B] w-full max-w-sm rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
               >
                 <h3 className="text-xl font-black mb-6">Editar Cartão</h3>
@@ -3562,26 +3343,18 @@ export default function App() {
                     </button>
                   </div>
                 </form>
-              </motion.div>
+              </div>
             </div>
           )}
-        </AnimatePresence>
 
         {/* Edit Income Modal */}
-        <AnimatePresence>
-          {editingIncome && (
+        {editingIncome && (
             <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }} 
-                exit={{ opacity: 0 }}
+              <div 
                 onClick={() => setEditingIncome(null)} 
                 className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
               />
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }} 
-                animate={{ scale: 1, opacity: 1 }} 
-                exit={{ scale: 0.9, opacity: 0 }}
+              <div 
                 className="bg-[#1C1F2B] w-full max-w-sm rounded-[40px] p-8 relative z-10 shadow-2xl border border-slate-800"
               >
                 <h3 className="text-xl font-black mb-6">Editar Renda</h3>
@@ -3621,10 +3394,9 @@ export default function App() {
                     Salvar
                   </button>
                 </div>
-              </motion.div>
+              </div>
             </div>
           )}
-        </AnimatePresence>
       </div>
     );
     } catch (error) {
@@ -3648,59 +3420,6 @@ export default function App() {
       <ErrorBoundary>
         <GlobalErrorUI>
           {renderContent()}
-          {/* Global Install Prompt for Mobile */}
-          {!isStandalone && (
-            <div className="fixed bottom-24 left-6 right-6 z-50">
-              {deferredPrompt ? (
-                <motion.div 
-                  initial={{ y: 100, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  className="bg-primary text-on-primary p-4 rounded-2xl shadow-2xl flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <Download size={20} />
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-widest">Instale o Luko</p>
-                      <p className="text-[10px] opacity-80">Acesso rápido e offline</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      deferredPrompt.prompt();
-                      deferredPrompt.userChoice.then((choiceResult: any) => {
-                        if (choiceResult.outcome === 'accepted') {
-                          console.log('User accepted the install prompt');
-                        }
-                        setDeferredPrompt(null);
-                      });
-                    }}
-                    className="bg-on-primary text-primary px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                  >
-                    Instalar
-                  </button>
-                </motion.div>
-              ) : (
-                /iPhone|iPad|iPod/.test(navigator.userAgent) && (
-                  <motion.div 
-                    initial={{ y: 100, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    className="bg-[#1C1F2B] text-white p-4 rounded-2xl border border-slate-800 shadow-2xl flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Download size={20} className="text-primary" />
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-widest">Instale no iOS</p>
-                        <p className="text-[10px] text-slate-400">Toque em Compartilhar e "Adicionar à Tela de Início"</p>
-                      </div>
-                    </div>
-                    <div className="w-8 h-8 flex items-center justify-center">
-                      <div className="w-1 h-1 bg-slate-500 rounded-full" />
-                    </div>
-                  </motion.div>
-                )
-              )}
-            </div>
-          )}
         </GlobalErrorUI>
       </ErrorBoundary>
     );
@@ -3728,20 +3447,11 @@ function SettingsAccordion({ title, icon, children, isOpen, onToggle }: { title:
         </div>
         {isOpen ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
       </button>
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            <div className="p-6 pt-0">
-              {children}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className="p-6 pt-0">
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
