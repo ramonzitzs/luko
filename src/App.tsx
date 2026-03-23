@@ -1049,6 +1049,7 @@ export default function App() {
     privacyMode: false,
     readNotificationIds: [] 
   });
+  const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [openedAccordion, setOpenedAccordion] = useState<string | null>(null);
@@ -1117,6 +1118,13 @@ export default function App() {
 
   // --- Auth ---
   useEffect(() => {
+    const authTimeout = setTimeout(() => {
+      if (!isAuthReady) {
+        console.warn("Auth timeout reached, forcing ready state");
+        setIsAuthReady(true);
+      }
+    }, 10000);
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
         setUser(user);
@@ -1142,9 +1150,13 @@ export default function App() {
         console.error("Auth state change error:", error);
       } finally {
         setIsAuthReady(true);
+        clearTimeout(authTimeout);
       }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      clearTimeout(authTimeout);
+    };
   }, []);
 
   // --- Real-time Data ---
@@ -1165,6 +1177,9 @@ export default function App() {
           pendingInvite: data.pendingInvite,
           pixKey: data.pixKey
         });
+        setIsSettingsLoaded(true);
+      } else {
+        setIsSettingsLoaded(true);
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
 
@@ -1877,24 +1892,27 @@ export default function App() {
     }
   }, [notifications, settings.pushNotifications, settings.readNotificationIds, pushedNotificationIds]);
 
-  if (!isAuthReady) {
-    return (
-      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setOpenedAccordion(null);
     if (tab === 'history') {
       setSelectedHistoryCategory('Todas');
     }
+    if (tab === 'goals') {
+      setHasVisitedLukinho(true);
+    }
   };
 
   const renderContent = () => {
     try {
+      if (!isAuthReady) {
+        return (
+          <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        );
+      }
+
       if (!user) {
       return (
         <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
@@ -1937,7 +1955,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
         {/* Essential Data Check */}
-        {(!settings || !user) && (
+        {(!isSettingsLoaded || !user) && (
           <div className="fixed inset-0 bg-[#0F111A] z-50 flex items-center justify-center">
             <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
           </div>
@@ -2426,7 +2444,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {hasVisitedLukinho && (
+          {(activeTab === 'goals' || hasVisitedLukinho) && (
             <div style={{ display: activeTab === 'goals' ? 'block' : 'none' }}>
               <motion.div 
                 initial={{ opacity: 0 }} 
@@ -2843,6 +2861,18 @@ export default function App() {
                 </button>
               </div>
             </motion.div>
+          )}
+
+          {!['dashboard', 'history', 'goals', 'more'].includes(activeTab) && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <p className="text-slate-500 mb-4">Página não encontrada ({activeTab})</p>
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className="bg-primary text-on-primary px-6 py-3 rounded-2xl font-bold"
+              >
+                Voltar ao Início
+              </button>
+            </div>
           )}
         </main>
 
