@@ -502,12 +502,16 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
           </div>
         </div>
         <div className="text-right ml-4 flex-shrink-0">
-          <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
-            {t.type === 'income' ? '+' : '-'} {privacyMode ? '••••••' : formatCurrency(t.amount)}
-          </p>
-            <p className="text-[10px] font-bold text-slate-500 mt-0.5">
-              {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : ''}
+          <div className="flex flex-col items-end">
+            <p className={`font-bold text-sm ${t.type === 'income' ? 'text-emerald-500' : 'text-white'}`}>
+              {t.type === 'income' ? '+' : '-'} {privacyMode ? '••••••' : formatCurrency(t.amount)}
             </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p className="text-[10px] font-bold text-slate-500">
+                {t.date instanceof Date ? t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : ''}
+              </p>
+            </div>
+          </div>
         </div>
       </motion.div>
     </div>
@@ -730,11 +734,12 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
       // VALOR DISPONÍVEL (Exactly what shows on the dashboard)
       const dashboardAvailable = Math.max(0, limit - totalMonthlyExpenses);
       
-      // CHAT 2: VALOR DISPONÍVEL - FUTUROS GASTOS (Vencidas e A Pagar)
-      const finalBalance = dashboardAvailable - futureExpenses;
+      // CHAT 2: PREVISÃO FINAL DO MÊS
+      // A previsão para o fim do mês é o que sobra do limite após todos os gastos (pagos ou não)
+      const finalBalance = dashboardAvailable;
       
-      // CHAT 3: FINAL BALANCE / DAYS
-      const dailyQuota = finalBalance / daysRemaining;
+      // CHAT 3: COTA DIÁRIA PARA O RESTANTE DO MÊS
+      const dailyQuota = Math.max(0, finalBalance / daysRemaining);
 
       // 2. Dynamic Messages
       const firstName = userName || 'Adriano';
@@ -748,23 +753,29 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
       const valStr = `**${formatBRL(finalBalance)}**`;
       const predictionMsgs = finalBalance > 0 
         ? [
-            `Se você parar de inventar moda, termina o mês com ${valStr} no bolso. Dá pra ser feliz!`,
-            `Olha só, vai sobrar ${valStr} no último dia do mês. Já dá pra pensar no churrasco!`,
-            `Tudo pago e ainda sobram ${valStr}. Você tá voando, campeão!`
+            `Se você seguir nesse ritmo, termina o MÊS com ${valStr} no bolso. Dá pra ser feliz!`,
+            `Olha só, a previsão é sobrar ${valStr} no último dia do mês. Já dá pra planejar o fds!`,
+            `Tudo pago e ainda sobram ${valStr} no fim do mês. Você tá voando, campeão!`
           ]
         : [
-            `Ih, rapaz... se pagar tudo, vai faltar ${valStr}. Hora de vender um rim ou cancelar o streaming!`,
-            `A conta não fecha: vai ficar ${valStr} no vermelho. O Serasa já tá digitando seu nome...`,
-            `Previsão de ${valStr} negativos. Melhor começar a treinar a dieta do sol!`
+            `Ih, rapaz... se pagar tudo até o fim do mês, vai faltar ${valStr}. Hora de vender um rim!`,
+            `A conta não fecha pro mês: vai ficar ${valStr} no vermelho. O Serasa já tá de olho...`,
+            `Previsão de ${valStr} negativos no fim do mês. Melhor começar a treinar a dieta do sol!`
           ];
 
       const quotaStr = `**${formatBRL(dailyQuota)}**`;
-      const quotaMsgs = [
-        `Pra não passar vergonha, você só pode gastar ${quotaStr} por dia. Segura esse cartão!`,
-        `Sua meta de hoje é não passar de ${quotaStr}. Se sobrar, é lucro!`,
-        `Liberado gastar ${quotaStr} hoje. Se gastar mais, o iFood vai ter que ser deletado!`,
-        `Foca no objetivo: ${quotaStr} por dia é o seu limite de sobrevivência.`
-      ];
+      const quotaMsgs = dailyQuota > 0 
+        ? [
+            `Pra não passar vergonha, você só pode gastar ${quotaStr} por dia. Segura esse cartão!`,
+            `Sua meta de hoje é não passar de ${quotaStr}. Se sobrar, é lucro!`,
+            `Liberado gastar ${quotaStr} hoje. Se gastar mais, o iFood vai ter que ser deletado!`,
+            `Foca no objetivo: ${quotaStr} por dia é o seu limite de sobrevivência.`
+          ]
+        : [
+            `Pode parar tudo! Você já estourou o limite e não pode gastar mais **NADA** hoje. Segura a emoção!`,
+            `Cota diária: **ZERO**. Nada de gastos extras se quiser sobreviver até o fim do mês!`,
+            `O Lukinho avisa: sua cota de hoje acabou. Fecha essa carteira e vai ler um livro!`
+          ];
 
       setMessages({
         greeting: greetings[getStableIndex(prediction, greetings.length, 'greet')],
@@ -1271,6 +1282,7 @@ export default function App() {
             installmentIndex: i + 1,
             parentTransactionId: parentId,
             installmentsCount: t.installmentsCount,
+            isPaid: false,
             location: location
           });
           await addDoc(collection(db, 'transactions'), newDoc);
@@ -1291,6 +1303,7 @@ export default function App() {
             familyId: settings.familyId,
             date: Timestamp.fromDate(transDate),
             isRecurring: true,
+            isPaid: false,
             parentTransactionId: parentId,
             location: location
           });
@@ -1308,6 +1321,7 @@ export default function App() {
           familyId: settings.familyId,
           date: Timestamp.fromDate(transDate),
           isRecurring: false,
+          isPaid: true,
           location: location
         });
         await addDoc(collection(db, 'transactions'), newDoc);
@@ -1394,17 +1408,33 @@ export default function App() {
           item.parentTransactionId === t.parentTransactionId
         );
         
-        // Update all related ones with the same data (except title which might have index)
+        // Fields that SHOULD be updated in bulk across all related transactions
+        const bulkFields = ['title', 'amount', 'category', 'cardId', 'familyId'];
+        const bulkData: any = {};
+        Object.keys(data).forEach(key => {
+          if (bulkFields.includes(key)) {
+            bulkData[key] = (data as any)[key];
+          }
+        });
+
         const batch = relatedTransactions.map(related => {
-          let updateData = { ...data };
-          
-          if (data.title && related.installmentIndex && related.installmentsCount) {
-            const cleanTitle = data.title.replace(/\s\(\d+\/\d+\)$/, '');
-            updateData.title = `${cleanTitle} (${related.installmentIndex}/${related.installmentsCount})`;
+          // For the specific transaction being edited, apply ALL changes (including isPaid/date)
+          if (related.id === id) {
+            return updateDoc(doc(db, 'transactions', related.id), data);
           }
           
-          return updateDoc(doc(db, 'transactions', related.id), updateData);
-        });
+          // For other related transactions, only apply bulk fields if any
+          if (Object.keys(bulkData).length > 0) {
+            const finalBulkData = { ...bulkData };
+            // Special handling for title with index
+            if (bulkData.title && related.installmentIndex && related.installmentsCount) {
+              const cleanTitle = bulkData.title.replace(/\s\(\d+\/\d+\)$/, '');
+              finalBulkData.title = `${cleanTitle} (${related.installmentIndex}/${related.installmentsCount})`;
+            }
+            return updateDoc(doc(db, 'transactions', related.id), finalBulkData);
+          }
+          return null;
+        }).filter(Boolean) as Promise<void>[];
         
         await Promise.all(batch);
       } else {
@@ -3374,7 +3404,7 @@ export default function App() {
                     onClick={() => {
                       updateTransaction(editingTransaction.id, { 
                         title: editingTransaction.title, 
-                        amount: editingTransaction.amount 
+                        amount: editingTransaction.amount
                       });
                       setEditingTransaction(null);
                     }}

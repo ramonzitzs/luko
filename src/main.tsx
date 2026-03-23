@@ -3,7 +3,21 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Suppress Vite WebSocket errors which are common in the preview environment
+// Suppress Vite WebSocket and Firestore WebChannel errors which are common in the preview environment
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  const msg = args.join(' ');
+  if (msg.includes('WebChannelConnection') || msg.includes('RPC \'Listen\' stream')) return;
+  originalWarn.apply(console, args);
+};
+
+const originalError = console.error;
+console.error = (...args) => {
+  const msg = args.join(' ');
+  if (msg.includes('[vite] failed to connect to websocket')) return;
+  originalError.apply(console, args);
+};
+
 window.addEventListener('error', (e) => {
   const msg = e.message || (e.error && e.error.message) || '';
   if (msg.includes('WebSocket') || msg.includes('[vite]')) {
