@@ -307,7 +307,7 @@ class ErrorBoundary extends Component<any, any> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
             <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
               <AlertCircle size={32} />
@@ -360,7 +360,7 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     }
 
     return (
-      <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
         <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
           <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
             <AlertCircle size={32} />
@@ -1835,7 +1835,7 @@ export default function App() {
     
     if (!isAuthReady) {
       return (
-        <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center">
+        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
           <div 
             className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
           />
@@ -1847,7 +1847,7 @@ export default function App() {
       if (!user) {
         console.log("Rendering Login Screen");
         return (
-          <div className="min-h-[100dvh] bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
+          <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
           <div 
             className="max-w-sm w-full relative z-10"
           >
@@ -1883,7 +1883,7 @@ export default function App() {
 
       console.log("Rendering Main App. Tab:", activeTab);
       return (
-        <div className="min-h-[100dvh] bg-[#0F111A] text-white font-sans pb-24">
+        <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -2088,9 +2088,9 @@ export default function App() {
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="font-bold text-lg">Meus Cartões</h3>
                     </div>
-                    <div className="overflow-hidden -mx-6 px-6">
+                    <div className="overflow-hidden -mx-6">
                       <div 
-                        className="flex gap-4 overflow-x-auto no-scrollbar pb-4"
+                        className="flex gap-4 overflow-x-auto no-scrollbar pb-4 px-6"
                       >
                         {cards.length === 0 ? (
                           <div className="bg-[#1C1F2B] border-2 border-dashed border-slate-800 rounded-[24px] p-6 w-full text-center text-slate-500">
@@ -3402,7 +3402,7 @@ export default function App() {
     } catch (error) {
       console.error("Render error:", error);
       return (
-        <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
             <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
             <p className="text-slate-400 text-sm mb-6">Ocorreu um erro ao renderizar o aplicativo.</p>
