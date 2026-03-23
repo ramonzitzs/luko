@@ -8,7 +8,6 @@ const app = initializeApp(firebaseConfig);
 
 // Use initializeFirestore to enable experimentalForceLongPolling for better stability in the preview environment
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   experimentalForceLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId);
 

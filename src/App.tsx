@@ -732,14 +732,14 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
         .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
       // VALOR DISPONÍVEL (Exactly what shows on the dashboard)
-      const dashboardAvailable = Math.max(0, limit - totalMonthlyExpenses);
+      const dashboardAvailable = limit - totalMonthlyExpenses;
       
       // CHAT 2: PREVISÃO FINAL DO MÊS
       // A previsão para o fim do mês é o que sobra do limite após todos os gastos (pagos ou não)
       const finalBalance = dashboardAvailable;
       
       // CHAT 3: COTA DIÁRIA PARA O RESTANTE DO MÊS
-      const dailyQuota = Math.max(0, finalBalance / daysRemaining);
+      const dailyQuota = finalBalance / daysRemaining;
 
       // 2. Dynamic Messages
       const firstName = userName || 'Adriano';
@@ -750,7 +750,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
         `Diz aí, ${firstName}! Fiz as contas aqui e tive que usar até os dedos do pé pra terminar.`
       ];
 
-      const valStr = `**${formatBRL(finalBalance)}**`;
+      const valStr = `**${formatBRL(Math.abs(finalBalance))}**`;
       const predictionMsgs = finalBalance > 0 
         ? [
             `Se você seguir nesse ritmo, termina o MÊS com ${valStr} no bolso. Dá pra ser feliz!`,
@@ -763,7 +763,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
             `Previsão de ${valStr} negativos no fim do mês. Melhor começar a treinar a dieta do sol!`
           ];
 
-      const quotaStr = `**${formatBRL(dailyQuota)}**`;
+      const quotaStr = `**${formatBRL(Math.abs(dailyQuota))}**`;
       const quotaMsgs = dailyQuota > 0 
         ? [
             `Pra não passar vergonha, você só pode gastar ${quotaStr} por dia. Segura esse cartão!`,
@@ -1049,7 +1049,6 @@ export default function App() {
     privacyMode: false,
     readNotificationIds: [] 
   });
-  const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [openedAccordion, setOpenedAccordion] = useState<string | null>(null);
@@ -1118,45 +1117,29 @@ export default function App() {
 
   // --- Auth ---
   useEffect(() => {
-    const authTimeout = setTimeout(() => {
-      if (!isAuthReady) {
-        console.warn("Auth timeout reached, forcing ready state");
-        setIsAuthReady(true);
-      }
-    }, 10000);
-
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      try {
-        setUser(user);
-        if (user) {
-          setActiveTab('dashboard');
-          // Ensure user doc exists
-          const userRef = doc(db, 'users', user.uid);
-          const userSnap = await getDoc(userRef);
-          if (!userSnap.exists()) {
-            await setDoc(userRef, {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL,
-              incomes: [],
-              monthlyLimit: 0,
-              pushNotifications: true,
-              readNotificationIds: []
-            });
-          }
+      setUser(user);
+      setIsAuthReady(true);
+      if (user) {
+        setActiveTab('dashboard');
+        // Ensure user doc exists
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) {
+          await setDoc(userRef, {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+            incomes: [],
+            monthlyLimit: 0,
+            pushNotifications: true,
+            readNotificationIds: []
+          });
         }
-      } catch (error) {
-        console.error("Auth state change error:", error);
-      } finally {
-        setIsAuthReady(true);
-        clearTimeout(authTimeout);
       }
     });
-    return () => {
-      unsubscribe();
-      clearTimeout(authTimeout);
-    };
+    return () => unsubscribe();
   }, []);
 
   // --- Real-time Data ---
@@ -1177,9 +1160,6 @@ export default function App() {
           pendingInvite: data.pendingInvite,
           pixKey: data.pixKey
         });
-        setIsSettingsLoaded(true);
-      } else {
-        setIsSettingsLoaded(true);
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
 
@@ -1802,7 +1782,7 @@ export default function App() {
     // Default limit to total income if not set
     const limit = settings.monthlyLimit || totalIncome;
 
-    const available = Math.max(0, limit - monthlyExpenses);
+    const available = limit - monthlyExpenses;
     const progress = limit > 0 ? (monthlyExpenses / limit) * 100 : 0;
 
     return { totalIncome, expenses: monthlyExpenses, available, progress, limit };
@@ -1892,6 +1872,14 @@ export default function App() {
     }
   }, [notifications, settings.pushNotifications, settings.readNotificationIds, pushedNotificationIds]);
 
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setOpenedAccordion(null);
@@ -1905,14 +1893,6 @@ export default function App() {
 
   const renderContent = () => {
     try {
-      if (!isAuthReady) {
-        return (
-          <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
-            <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-          </div>
-        );
-      }
-
       if (!user) {
       return (
         <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
@@ -1954,12 +1934,6 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
-        {/* Essential Data Check */}
-        {(!isSettingsLoaded || !user) && (
-          <div className="fixed inset-0 bg-[#0F111A] z-50 flex items-center justify-center">
-            <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -2444,7 +2418,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {(activeTab === 'goals' || hasVisitedLukinho) && (
+          {hasVisitedLukinho && (
             <div style={{ display: activeTab === 'goals' ? 'block' : 'none' }}>
               <motion.div 
                 initial={{ opacity: 0 }} 
@@ -2861,18 +2835,6 @@ export default function App() {
                 </button>
               </div>
             </motion.div>
-          )}
-
-          {!['dashboard', 'history', 'goals', 'more'].includes(activeTab) && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <p className="text-slate-500 mb-4">Página não encontrada ({activeTab})</p>
-              <button 
-                onClick={() => setActiveTab('dashboard')}
-                className="bg-primary text-on-primary px-6 py-3 rounded-2xl font-bold"
-              >
-                Voltar ao Início
-              </button>
-            </div>
           )}
         </main>
 
@@ -3563,23 +3525,13 @@ export default function App() {
         </AnimatePresence>
       </div>
     );
-    } catch (error: any) {
+    } catch (error) {
       console.error("Render error:", error);
       return (
         <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
-            <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
-              <AlertCircle size={32} />
-            </div>
             <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
             <p className="text-slate-400 text-sm mb-6">Ocorreu um erro ao renderizar o aplicativo.</p>
-            {error && (
-              <div className="mb-6 p-4 bg-black/20 rounded-xl text-left overflow-auto max-h-32">
-                <p className="text-xs font-mono text-rose-400 break-all">
-                  {error.message || String(error)}
-                </p>
-              </div>
-            )}
             <button onClick={() => window.location.reload()} className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl">
               Recarregar
             </button>
