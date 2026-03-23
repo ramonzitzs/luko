@@ -1930,33 +1930,24 @@ export default function App() {
 
   const renderContent = () => {
     console.log("Rendering content. User:", !!user, "Tab:", activeTab, "isAuthReady:", isAuthReady);
+    
+    if (!isAuthReady) {
+      return (
+        <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center">
+          <motion.div 
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full"
+          />
+        </div>
+      );
+    }
+
     try {
       if (!user) {
         console.log("Rendering Login Screen");
         return (
           <div className="min-h-[100dvh] bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
-          {/* PWA Install Banner */}
-          {deferredPrompt && (
-            <motion.div 
-              initial={{ y: -100 }}
-              animate={{ y: 0 }}
-              className="fixed top-0 left-0 right-0 p-4 z-50"
-            >
-              <div className="bg-[#0F111A] text-white p-4 rounded-2xl flex items-center justify-between shadow-2xl">
-                <div className="flex items-center gap-3">
-                  <Download size={20} className="text-[#cdfc54]" />
-                  <p className="text-xs font-bold uppercase tracking-widest">Instale o Luko</p>
-                </div>
-                <button 
-                  onClick={handleInstallClick}
-                  className="bg-[#cdfc54] text-[#0F111A] px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest"
-                >
-                  Instalar
-                </button>
-              </div>
-            </motion.div>
-          )}
-
           <motion.div 
             initial={{ opacity: 1 }}
             animate={{ opacity: 1 }}
@@ -3639,7 +3630,7 @@ export default function App() {
     } catch (error) {
       console.error("Render error:", error);
       return (
-        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+        <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
             <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
             <p className="text-slate-400 text-sm mb-6">Ocorreu um erro ao renderizar o aplicativo.</p>
