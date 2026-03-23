@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo, useEffect, Component, ReactNode, ErrorInfo, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, 
   LayoutDashboard, 
@@ -433,33 +434,45 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
 
   return (
     <div className="relative overflow-hidden rounded-[20px]">
-      {showConfirm && (
-        <div 
-          className="absolute inset-0 z-20 bg-[#1C1F2B]/95 backdrop-blur-sm flex items-center justify-between px-6"
-        >
-          <p className="text-xs font-bold text-white uppercase tracking-widest">Excluir?</p>
-          <div className="flex gap-3">
-            <button 
-              onClick={() => {
-                setShowConfirm(false);
-              }}
-              className="px-4 py-2 bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
-            >
-              Não
-            </button>
-            <button 
-              onClick={handleDelete}
-              className="px-4 py-2 bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-500/20 active:scale-95 transition-transform"
-            >
-              Sim
-            </button>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {showConfirm && (
+          <motion.div 
+            initial={{ opacity: 0, x: 100 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 100 }}
+            className="absolute inset-0 z-20 bg-[#1C1F2B]/95 backdrop-blur-sm flex items-center justify-between px-6"
+          >
+            <p className="text-xs font-bold text-white uppercase tracking-widest">Excluir?</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  setShowConfirm(false);
+                }}
+                className="px-4 py-2 bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
+              >
+                Não
+              </button>
+              <button 
+                onClick={handleDelete}
+                className="px-4 py-2 bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-500/20 active:scale-95 transition-transform"
+              >
+                Sim
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div 
+      <motion.div 
+        drag="x"
+        dragConstraints={{ left: -100, right: 0 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.x < -50) {
+            setShowConfirm(true);
+          }
+        }}
         onClick={onClick}
-        className="bg-[#1C1F2B] p-4 rounded-[20px] flex items-center justify-between border border-slate-800/50 relative z-10 group active:bg-[#252a3a] transition-colors"
+        className="bg-[#1C1F2B] p-3 rounded-[20px] flex items-center justify-between border border-slate-800/50 relative z-10 group active:bg-[#252a3a] transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-4 min-w-0 flex-1">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${CATEGORIES[t.category]?.color || 'bg-slate-800 text-slate-400'}`}>
@@ -490,17 +503,8 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
               </div>
             </div>
           </div>
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowConfirm(true);
-            }}
-            className="p-2 text-slate-600 hover:text-rose-500 transition-colors"
-          >
-            <Trash2 size={16} />
-          </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };
@@ -511,10 +515,19 @@ const NotificationItem: React.FC<{
   onClick: () => void
 }> = ({ n, onRead, onClick }) => {
   return (
-    <div className="relative overflow-hidden rounded-2xl">
+    <motion.div 
+      layout
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="relative overflow-hidden rounded-2xl"
+    >
       <div 
-        onClick={onClick}
-        className="bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50 flex items-center gap-4 relative z-10 group transition-colors active:bg-[#1C1F2B]"
+        onClick={() => {
+          onRead(n.id);
+          // Only mark as read, don't call onClick which opens transaction
+        }}
+        className="bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50 flex items-center gap-4 relative z-10 group transition-colors active:bg-[#1C1F2B] cursor-pointer"
       >
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${
           n.type === 'warning' ? 'bg-rose-500/10 text-rose-500' : 'bg-primary/10 text-primary'
@@ -525,17 +538,8 @@ const NotificationItem: React.FC<{
           <h4 className="font-bold text-sm truncate">{n.title}</h4>
           <p className="text-xs text-slate-400 mt-1 truncate">{n.message}</p>
         </div>
-        <button 
-          onClick={(e) => {
-            e.stopPropagation();
-            onRead(n.id);
-          }}
-          className="p-2 text-slate-600 hover:text-primary transition-colors"
-        >
-          <Check size={18} />
-        </button>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
@@ -575,14 +579,21 @@ const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onCompl
           return null;
         }
         
-        const isNegative = isBold && (part.includes('-R$') || part.includes('R$ -') || part.trim().startsWith('-'));
+        let content = part;
+        let isNegative = isBold && (part.includes('-R$') || part.includes('R$ -') || part.trim().startsWith('-'));
+        
+        // Support for hidden red marker
+        if (isBold && part.startsWith('!!!')) {
+          isNegative = true;
+          content = part.replace('!!!', '');
+        }
         
         return (
           <span 
             key={index} 
             className={isBold ? (isNegative ? "text-red-500 font-bold" : "text-[#cdfc54] font-bold") : ""}
           >
-            {part}
+            {content}
           </span>
         );
       })}
@@ -617,7 +628,7 @@ const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnim
   if (!visible) return null;
 
   return (
-    <div className={`flex items-start gap-5 ${isLast ? '' : 'mb-10'}`}>
+    <div className={`flex items-start gap-5 ${isLast ? '' : 'mb-6'}`}>
       <div className="flex-shrink-0 mt-1">
         <img 
           src={avatar} 
@@ -718,7 +729,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
         `Diz aí, ${firstName}! Fiz as contas aqui e tive que usar até os dedos do pé pra terminar.`
       ];
 
-      const valStr = `**${formatBRL(Math.abs(finalBalance))}**`;
+      const valStr = `**${finalBalance < 0 ? '!!!' : ''}${formatBRL(Math.abs(finalBalance))}**`;
       const predictionMsgs = finalBalance > 0 
         ? [
             `Se você seguir nesse ritmo, termina o MÊS com ${valStr} no bolso. Dá pra ser feliz!`,
@@ -731,7 +742,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
             `Previsão de ${valStr} negativos no fim do mês. Melhor começar a treinar a dieta do sol!`
           ];
 
-      const quotaStr = `**${formatBRL(Math.abs(dailyQuota))}**`;
+      const quotaStr = `**${dailyQuota < 0 ? '!!!' : ''}${formatBRL(Math.abs(dailyQuota))}**`;
       const quotaMsgs = dailyQuota > 0 
         ? [
             `Pra não passar vergonha, você só pode gastar ${quotaStr} por dia. Segura esse cartão!`,
@@ -879,6 +890,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
           O tom deve ser CÔMICO, DESCOLADO e SINCERO (estilo "Lukinho", jovem e zueiro). 
           Se o saldo for positivo, brinque que ele vai ser o novo Elon Musk. 
           Se for negativo ou perto do limite, faça uma piada ácida sobre ele ter que comer miojo ou vender a alma. 
+          Sempre destaque valores monetários com **asteriscos duplos**. Se o valor for negativo ou representar um déficit, use o prefixo !!! dentro dos asteriscos (ex: **!!!R$ 100,00**).
           Máximo 15 palavras. Responda apenas a frase.`,
         });
         
@@ -964,6 +976,7 @@ export default function App() {
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isTransactionsLoading, setIsTransactionsLoading] = useState(true);
   const [cards, setCards] = useState<Card[]>([]);
   const [settings, setSettings] = useState<UserSettings>({ 
     incomes: [], 
@@ -1106,7 +1119,11 @@ export default function App() {
         };
       }) as Transaction[];
       setTransactions(transData);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
+      setIsTransactionsLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'transactions');
+      setIsTransactionsLoading(false);
+    });
 
     const qCards = query(collection(db, 'cards'), where(idField, '==', targetId));
     const unsubCards = onSnapshot(qCards, (snapshot) => {
@@ -1694,6 +1711,7 @@ export default function App() {
 
   // --- Stats ---
   const stats = useMemo(() => {
+    if (isTransactionsLoading) return null;
     try {
       const currentMonth = selectedMonth.getMonth();
       const currentYear = selectedMonth.getFullYear();
@@ -1822,6 +1840,7 @@ export default function App() {
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setOpenedAccordion(null);
+    setSelectedCardId(null);
     if (tab === 'history') {
       setSelectedHistoryCategory('Todas');
     }
@@ -1883,7 +1902,7 @@ export default function App() {
 
       console.log("Rendering Main App. Tab:", activeTab);
       return (
-        <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
+        <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-32">
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -1915,22 +1934,6 @@ export default function App() {
               <button 
                 onClick={() => {
                   setIsNotificationOpen(true);
-                  if (notifications.length > 0) {
-                    const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), ...notifications.map(n => n.id)]));
-                    // Keep only recent read IDs to avoid bloat (last 7 days)
-                    const sevenDaysAgo = new Date();
-                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-                    const filteredReadIds = newReadIds.filter(id => {
-                      const parts = id.split('-');
-                      const dateStr = parts[parts.length - 1];
-                      if (!dateStr || !dateStr.includes(':')) { // Simple check for YYYY-MM-DD
-                        const d = new Date(dateStr);
-                        return !isNaN(d.getTime()) && d >= sevenDaysAgo;
-                      }
-                      return true;
-                    });
-                    updateSettings({ readNotificationIds: filteredReadIds });
-                  }
                 }}
                 className="relative p-2 flex items-center justify-center"
               >
@@ -1944,17 +1947,17 @@ export default function App() {
         </header>
 
         {/* Main Content */}
-        <main className="px-6 max-w-md mx-auto space-y-6">
+        <main className="px-6 max-w-md mx-auto space-y-4">
           
           {activeTab === 'dashboard' && (
-            <div className="space-y-8">
+            <div className="flex flex-col gap-10">
               {console.log("Dashboard Render Start. Cards:", cards.length, "Transactions:", transactions.length)}
               {(() => {
                 try {
                   return (
                     <>
                       {selectedCardId ? (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   <div className="flex items-center gap-4">
                     <button onClick={() => setSelectedCardId(null)} className="p-2 bg-[#1C1F2B] rounded-full border border-slate-800">
                       <ArrowLeft size={20} />
@@ -2060,37 +2063,37 @@ export default function App() {
                         <p className="text-on-primary/70 text-sm font-medium">Disponível</p>
                       </div>
                       <h2 className="text-4xl font-black mb-6">
-                        {settings.privacyMode ? '••••••' : formatCurrency(stats.available)}
+                        {settings.privacyMode ? '••••••' : (stats ? formatCurrency(stats.available) : '...')}
                       </h2>
                       
                       <div className="space-y-3">
                         <div className="h-2.5 bg-[#0F111A]/20 rounded-full overflow-hidden">
                           <div 
-                            style={{ width: `${Math.min(100, stats.progress)}%` }}
+                            style={{ width: `${Math.min(100, stats?.progress || 0)}%` }}
                             className="h-full bg-[#0F111A] rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000"
                           />
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-on-primary/60 font-medium">
                           <div className="flex items-center gap-1">
                             <ArrowDownLeft size={10} />
-                            <span>{formatCurrency(stats.expenses)}</span>
+                            <span>{stats ? formatCurrency(stats.expenses) : '...'}</span>
                           </div>
                           <div className="flex items-center gap-1">
                             <ArrowUpRight size={10} />
-                            <span>{formatCurrency(stats.limit)}</span>
+                            <span>{stats ? formatCurrency(stats.limit) : '...'}</span>
                           </div>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <section>
-                    <div className="flex justify-between items-center mb-4">
+                  <section className="flex flex-col gap-4">
+                    <div className="flex justify-between items-center">
                       <h3 className="font-bold text-lg">Meus Cartões</h3>
                     </div>
                     <div className="overflow-hidden -mx-6">
                       <div 
-                        className="flex gap-4 overflow-x-auto no-scrollbar pb-4 px-6"
+                        className="flex gap-4 overflow-x-auto no-scrollbar px-6 pb-4 -mb-4"
                       >
                         {cards.length === 0 ? (
                           <div className="bg-[#1C1F2B] border-2 border-dashed border-slate-800 rounded-[24px] p-6 w-full text-center text-slate-500">
@@ -2147,8 +2150,8 @@ export default function App() {
                   </section>
 
                   {billsDueThisWeek.length > 0 && (
-                    <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                      <div className="flex justify-between items-center mb-4">
+                    <section className="animate-in fade-in duration-500 flex flex-col gap-4">
+                      <div className="flex justify-between items-center">
                         <h3 className="font-bold text-lg text-primary flex items-center gap-2">
                           <Calendar size={20} className="relative -top-[1px]" />
                           Pagar
@@ -2191,8 +2194,8 @@ export default function App() {
                     </section>
                   )}
 
-                  <section>
-                    <div className="flex justify-between items-center mb-4">
+                  <section className="flex flex-col gap-4">
+                    <div className="flex justify-between items-center">
                       <h3 
                         className="font-bold text-lg cursor-pointer hover:text-primary transition-colors"
                         onClick={() => {
@@ -2204,7 +2207,7 @@ export default function App() {
                       </h3>
                     </div>
                     <div className="relative">
-                      <div className="space-y-3 pb-6">
+                      <div className="space-y-3 pb-0">
                         {filteredTransactions.slice(0, 5).map((t) => (
                           <TransactionItem 
                             key={t.id} 
@@ -2216,14 +2219,14 @@ export default function App() {
                         ))}
                       </div>
                       {filteredTransactions.length > 0 && futureTransactions.length === 0 && (
-                        <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
+                        <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
                       )}
                     </div>
                   </section>
 
                   {futureTransactions.length > 0 && (
-                    <section className="mt-8">
-                      <div className="flex justify-between items-center mb-4">
+                    <section className="flex flex-col gap-4">
+                      <div className="flex justify-between items-center">
                         <h3 
                           className="font-bold text-lg cursor-pointer hover:text-primary transition-colors"
                           onClick={() => {
@@ -2235,7 +2238,7 @@ export default function App() {
                         </h3>
                       </div>
                       <div className="relative">
-                        <div className="space-y-3 pb-6">
+                        <div className="space-y-3 pb-0">
                           {futureTransactions.slice(0, 5).map((t) => (
                             <TransactionItem 
                               key={t.id} 
@@ -2247,7 +2250,7 @@ export default function App() {
                           ))}
                         </div>
                         {futureTransactions.length > 0 && (
-                          <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
+                          <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#0F111A] via-[#0F111A]/80 to-transparent pointer-events-none z-10" />
                         )}
                       </div>
                     </section>
@@ -2574,21 +2577,21 @@ export default function App() {
                     <div>
                       <div className="flex justify-between items-center mb-4">
                         <span className="text-sm font-bold text-slate-400">Limite Mensal</span>
-                        <span className="text-xl font-black text-primary">{formatCurrency(settings.monthlyLimit || stats.totalIncome)}</span>
+                        <span className="text-xl font-black text-primary">{formatCurrency(settings.monthlyLimit || (stats?.totalIncome || 0))}</span>
                       </div>
                       <div className="relative h-2 flex items-center">
                         <div className="absolute inset-0 bg-slate-800 rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-primary/30 transition-all duration-500"
-                            style={{ width: `${Math.min(100, ((settings.monthlyLimit || stats.totalIncome) / (stats.totalIncome || 1)) * 100)}%` }}
+                            style={{ width: `${Math.min(100, ((settings.monthlyLimit || (stats?.totalIncome || 0)) / ((stats?.totalIncome || 1))) * 100)}%` }}
                           />
                         </div>
                         <input 
                           type="range"
                           min="0"
-                          max={stats.totalIncome || 10000}
+                          max={stats?.totalIncome || 10000}
                           step="50"
-                          value={settings.monthlyLimit || stats.totalIncome}
+                          value={settings.monthlyLimit || (stats?.totalIncome || 0)}
                           onChange={(e) => updateSettings({ monthlyLimit: parseInt(e.target.value) })}
                           className="absolute inset-0 w-full h-2 bg-transparent appearance-none cursor-pointer accent-primary z-10"
                         />
@@ -2765,7 +2768,7 @@ export default function App() {
       </main>
 
         {/* Bottom Navigation */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-4 pb-6 z-40">
+        <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-4 pb-4 z-40">
           <div className="max-w-md mx-auto flex justify-between items-center relative">
             <NavButton 
               active={activeTab === 'dashboard'} 
@@ -3020,25 +3023,40 @@ export default function App() {
                       <p>Tudo limpo por aqui!</p>
                     </div>
                   ) : (
-                    notifications.map(n => (
-                      <NotificationItem 
-                        key={n.id}
-                        n={n}
-                        onRead={(id) => {
-                          const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), id]));
-                          updateSettings({ readNotificationIds: newReadIds });
-                        }}
-                        onClick={() => {
-                          if (n.transactionId) {
-                            const trans = transactions.find(t => t.id === n.transactionId);
-                            if (trans) {
-                              setEditingTransaction(trans);
-                              setIsNotificationOpen(false);
+                    <AnimatePresence mode="popLayout">
+                      {notifications.map(n => (
+                        <NotificationItem 
+                          key={n.id}
+                          n={n}
+                          onRead={(id) => {
+                            const newReadIds = Array.from(new Set([...(settings.readNotificationIds || []), id]));
+                            // Keep only recent read IDs to avoid bloat (last 7 days)
+                            const sevenDaysAgo = new Date();
+                            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                            const filteredReadIds = newReadIds.filter(id => {
+                              const parts = id.split('-');
+                              // The date is YYYY-MM-DD at the end, so last 3 parts
+                              const dateStr = parts.slice(-3).join('-');
+                              if (dateStr && dateStr.includes('-')) {
+                                const d = new Date(dateStr);
+                                return !isNaN(d.getTime()) && d >= sevenDaysAgo;
+                              }
+                              return true;
+                            });
+                            updateSettings({ readNotificationIds: filteredReadIds });
+                          }}
+                          onClick={() => {
+                            if (n.transactionId) {
+                              const trans = transactions.find(t => t.id === n.transactionId);
+                              if (trans) {
+                                setEditingTransaction(trans);
+                                setIsNotificationOpen(false);
+                              }
                             }
-                          }
-                        }}
-                      />
-                    ))
+                          }}
+                        />
+                      ))}
+                    </AnimatePresence>
                   )}
                 </div>
               </div>
