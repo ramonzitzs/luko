@@ -1068,14 +1068,25 @@ export default function App() {
   const [hasVisitedLukinho, setHasVisitedLukinho] = useState(false);
   const [isAnyModalOpen, setIsAnyModalOpen] = useState(false);
   const [pushedNotificationIds, setPushedNotificationIds] = useState<Set<string>>(new Set());
+  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    console.log("Auth State:", { isAuthReady, user: !!user });
+    console.log("Auth State Change:", { isAuthReady, user: !!user, uid: user?.uid });
   }, [isAuthReady, user]);
 
   useEffect(() => {
+    const checkStandalone = () => {
+      const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone || document.referrer.includes('android-app://');
+      setIsStandalone(isStandaloneMode);
+      console.log("Is Standalone:", isStandaloneMode);
+    };
+    checkStandalone();
+  }, []);
+
+  useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
-      // Don't prevent default, let the browser handle it if it wants
+      console.log("beforeinstallprompt event fired");
+      e.preventDefault();
       setDeferredPrompt(e);
     };
 
@@ -2000,6 +2011,23 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {!isStandalone && (
+                <button 
+                  onClick={() => {
+                    if (deferredPrompt) {
+                      deferredPrompt.prompt();
+                    } else if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+                      alert('Para instalar no iOS: toque no botão de Compartilhar e selecione "Adicionar à Tela de Início".');
+                    } else {
+                      alert('Use o menu do navegador para instalar o app.');
+                    }
+                  }}
+                  className="p-2 text-primary hover:text-primary/80 transition-colors flex items-center justify-center"
+                  title="Instalar App"
+                >
+                  <Download size={20} />
+                </button>
+              )}
               <button 
                 onClick={() => updateSettings({ privacyMode: !settings.privacyMode })}
                 className="p-2 text-slate-400 hover:text-white transition-colors flex items-center justify-center"
@@ -2048,8 +2076,12 @@ export default function App() {
           
           {activeTab === 'dashboard' && (
             <motion.div initial={{ opacity: 1 }} animate={{ opacity: 1 }} className="space-y-8">
-              
-              {selectedCardId ? (
+              {console.log("Dashboard Render Start. Cards:", cards.length, "Transactions:", transactions.length)}
+              {(() => {
+                try {
+                  return (
+                    <>
+                      {selectedCardId ? (
                 <div className="space-y-6">
                   <div className="flex items-center gap-4">
                     <button onClick={() => setSelectedCardId(null)} className="p-2 bg-[#1C1F2B] rounded-full border border-slate-800">
@@ -2363,6 +2395,13 @@ export default function App() {
                   )}
                 </>
               )}
+            </>
+          );
+        } catch (e) {
+          console.error("Dashboard render error:", e);
+          return <div className="p-6 bg-rose-500/10 text-rose-500 rounded-2xl">Erro ao carregar o dashboard.</div>;
+        }
+      })()}
             </motion.div>
           )}
 
@@ -3613,14 +3652,67 @@ export default function App() {
     }
   };
 
-  console.log("App Rendering. isAuthReady:", isAuthReady);
-  return (
-    <ErrorBoundary>
-      <GlobalErrorUI>
-        {renderContent()}
-      </GlobalErrorUI>
-    </ErrorBoundary>
-  );
+    console.log("App Rendering. isAuthReady:", isAuthReady, "User:", !!user);
+    return (
+      <ErrorBoundary>
+        <GlobalErrorUI>
+          {renderContent()}
+          {/* Global Install Prompt for Mobile */}
+          {!isStandalone && (
+            <div className="fixed bottom-24 left-6 right-6 z-50">
+              {deferredPrompt ? (
+                <motion.div 
+                  initial={{ y: 100, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  className="bg-primary text-on-primary p-4 rounded-2xl shadow-2xl flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <Download size={20} />
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-widest">Instale o Luko</p>
+                      <p className="text-[10px] opacity-80">Acesso rápido e offline</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      deferredPrompt.prompt();
+                      deferredPrompt.userChoice.then((choiceResult: any) => {
+                        if (choiceResult.outcome === 'accepted') {
+                          console.log('User accepted the install prompt');
+                        }
+                        setDeferredPrompt(null);
+                      });
+                    }}
+                    className="bg-on-primary text-primary px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Instalar
+                  </button>
+                </motion.div>
+              ) : (
+                /iPhone|iPad|iPod/.test(navigator.userAgent) && (
+                  <motion.div 
+                    initial={{ y: 100, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    className="bg-[#1C1F2B] text-white p-4 rounded-2xl border border-slate-800 shadow-2xl flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Download size={20} className="text-primary" />
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-widest">Instale no iOS</p>
+                        <p className="text-[10px] text-slate-400">Toque em Compartilhar e "Adicionar à Tela de Início"</p>
+                      </div>
+                    </div>
+                    <div className="w-8 h-8 flex items-center justify-center">
+                      <div className="w-1 h-1 bg-slate-500 rounded-full" />
+                    </div>
+                  </motion.div>
+                )
+              )}
+            </div>
+          )}
+        </GlobalErrorUI>
+      </ErrorBoundary>
+    );
 }
 
 function NavButton({ active, icon, label, onClick }: { active: boolean, icon: React.ReactNode, label: string, onClick: () => void }) {
