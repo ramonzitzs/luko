@@ -309,7 +309,7 @@ class ErrorBoundary extends Component<any, any> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+        <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
             <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
               <AlertCircle size={32} />
@@ -362,7 +362,7 @@ const GlobalErrorUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     }
 
     return (
-      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
+      <div className="min-h-[100dvh] bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
         <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
           <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
             <AlertCircle size={32} />
@@ -1782,30 +1782,36 @@ export default function App() {
 
   // --- Stats ---
   const stats = useMemo(() => {
-    const currentMonth = selectedMonth.getMonth();
-    const currentYear = selectedMonth.getFullYear();
+    try {
+      const currentMonth = selectedMonth.getMonth();
+      const currentYear = selectedMonth.getFullYear();
 
-    const monthlyExpenses = transactions
-      .filter(t => {
-        const tDate = new Date(t.date);
-        const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-        
-        const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
-        const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
-        
-        return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
-      })
-      .reduce((acc, t) => acc + t.amount, 0);
-    
-    const totalIncome = settings.incomes.reduce((acc, i) => acc + i.value, 0);
-    
-    // Default limit to total income if not set
-    const limit = settings.monthlyLimit || totalIncome;
+      const monthlyExpenses = (transactions || [])
+        .filter(t => {
+          if (!t || !t.date) return false;
+          const tDate = new Date(t.date);
+          const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+          
+          const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+          const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+          
+          return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
+        })
+        .reduce((acc, t) => acc + (t.amount || 0), 0);
+      
+      const totalIncome = (settings.incomes || []).reduce((acc, i) => acc + (i.value || 0), 0);
+      
+      // Default limit to total income if not set
+      const limit = settings.monthlyLimit || totalIncome;
 
-    const available = limit - monthlyExpenses;
-    const progress = limit > 0 ? (monthlyExpenses / limit) * 100 : 0;
+      const available = limit - monthlyExpenses;
+      const progress = limit > 0 ? (monthlyExpenses / limit) * 100 : 0;
 
-    return { totalIncome, expenses: monthlyExpenses, available, progress, limit };
+      return { totalIncome, expenses: monthlyExpenses, available, progress, limit };
+    } catch (error) {
+      console.error("Error calculating stats:", error);
+      return { totalIncome: 0, expenses: 0, available: 0, progress: 0, limit: 0 };
+    }
   }, [transactions, settings, selectedMonth]);
 
   const notifications = useMemo(() => {
@@ -1912,11 +1918,12 @@ export default function App() {
   };
 
   const renderContent = () => {
-    console.log("Rendering content. User:", !!user, "Tab:", activeTab);
+    console.log("Rendering content. User:", !!user, "Tab:", activeTab, "isAuthReady:", isAuthReady);
     try {
       if (!user) {
-      return (
-        <div className="min-h-screen min-h-[100dvh] bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
+        console.log("Rendering Login Screen");
+        return (
+          <div className="min-h-[100dvh] bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
           {/* PWA Install Banner */}
           {deferredPrompt && (
             <motion.div 
@@ -1974,8 +1981,9 @@ export default function App() {
       );
     }
 
-    return (
-      <div className="min-h-screen min-h-[100dvh] bg-[#0F111A] text-white font-sans pb-24">
+      console.log("Rendering Main App. Tab:", activeTab);
+      return (
+        <div className="min-h-[100dvh] bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -2039,7 +2047,7 @@ export default function App() {
         <main className="px-6 max-w-md mx-auto space-y-6">
           
           {activeTab === 'dashboard' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+            <motion.div initial={{ opacity: 1 }} animate={{ opacity: 1 }} className="space-y-8">
               
               {selectedCardId ? (
                 <div className="space-y-6">
@@ -2359,7 +2367,7 @@ export default function App() {
           )}
 
           {activeTab === 'history' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+            <motion.div initial={{ opacity: 1 }} animate={{ opacity: 1 }} className="space-y-4">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold">Extrato {selectedMonth.toLocaleDateString('pt-BR', { month: 'long' }).charAt(0).toUpperCase() + selectedMonth.toLocaleDateString('pt-BR', { month: 'long' }).slice(1)}</h2>
                 <select 
@@ -2463,7 +2471,7 @@ export default function App() {
           {hasVisitedLukinho && (
             <div style={{ display: activeTab === 'goals' ? 'block' : 'none' }}>
               <motion.div 
-                initial={{ opacity: 0 }} 
+                initial={{ opacity: 1 }} 
                 animate={{ opacity: 1 }} 
                 className="max-w-md mx-auto"
                 onViewportEnter={() => {
@@ -2577,7 +2585,7 @@ export default function App() {
 
           {activeTab === 'more' && (
             <motion.div 
-              initial={{ opacity: 0, y: 20 }} 
+              initial={{ opacity: 1, y: 0 }} 
               animate={{ opacity: 1, y: 0 }} 
               className="space-y-4 pb-12"
             >
