@@ -1118,25 +1118,30 @@ export default function App() {
   // --- Auth ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      setIsAuthReady(true);
-      if (user) {
-        setActiveTab('dashboard');
-        // Ensure user doc exists
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            incomes: [],
-            monthlyLimit: 0,
-            pushNotifications: true,
-            readNotificationIds: []
-          });
+      try {
+        setUser(user);
+        if (user) {
+          setActiveTab('dashboard');
+          // Ensure user doc exists
+          const userRef = doc(db, 'users', user.uid);
+          const userSnap = await getDoc(userRef);
+          if (!userSnap.exists()) {
+            await setDoc(userRef, {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+              incomes: [],
+              monthlyLimit: 0,
+              pushNotifications: true,
+              readNotificationIds: []
+            });
+          }
         }
+      } catch (error) {
+        console.error("Auth state change error:", error);
+      } finally {
+        setIsAuthReady(true);
       }
     });
     return () => unsubscribe();
@@ -1931,6 +1936,12 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
+        {/* Essential Data Check */}
+        {(!settings || !user) && (
+          <div className="fixed inset-0 bg-[#0F111A] z-50 flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -3522,13 +3533,23 @@ export default function App() {
         </AnimatePresence>
       </div>
     );
-    } catch (error) {
+    } catch (error: any) {
       console.error("Render error:", error);
       return (
         <div className="min-h-screen bg-[#0F111A] flex items-center justify-center p-6 text-center text-white">
           <div className="bg-[#1C1F2B] p-8 rounded-[32px] border border-slate-800 max-w-md w-full">
+            <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mx-auto mb-6">
+              <AlertCircle size={32} />
+            </div>
             <h2 className="text-xl font-bold mb-2">Ops! Algo deu errado</h2>
             <p className="text-slate-400 text-sm mb-6">Ocorreu um erro ao renderizar o aplicativo.</p>
+            {error && (
+              <div className="mb-6 p-4 bg-black/20 rounded-xl text-left overflow-auto max-h-32">
+                <p className="text-xs font-mono text-rose-400 break-all">
+                  {error.message || String(error)}
+                </p>
+              </div>
+            )}
             <button onClick={() => window.location.reload()} className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl">
               Recarregar
             </button>
