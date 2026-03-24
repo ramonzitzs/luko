@@ -22,6 +22,7 @@ import {
   CreditCard,
   Settings as SettingsIcon,
   LogOut,
+  Download,
   ChevronRight,
   Wallet,
   Sparkles,
@@ -158,12 +159,15 @@ const getCurrentLocation = (): Promise<{ lat: number, lng: number, address?: str
       return;
     }
 
+    const timeoutId = setTimeout(() => {
+      resolve(undefined);
+    }, 5000);
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        clearTimeout(timeoutId);
         const { latitude, longitude } = position.coords;
         try {
-          // Simple reverse geocoding using Nominatim (OpenStreetMap)
-          // Note: In a production app, you'd use a more robust service or your own backend
           const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`, {
             headers: {
               'Accept-Language': 'pt-BR'
@@ -181,6 +185,7 @@ const getCurrentLocation = (): Promise<{ lat: number, lng: number, address?: str
         }
       },
       () => {
+        clearTimeout(timeoutId);
         resolve(undefined);
       },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
@@ -543,6 +548,50 @@ const NotificationItem: React.FC<{
   );
 };
 
+const InstallBanner = () => {
+  const [show, setShow] = useState(() => {
+    try {
+      return !localStorage.getItem('luko_install_dismissed');
+    } catch (e) {
+      return true;
+    }
+  });
+
+  if (!show) return null;
+
+  return (
+    <div className="fixed top-4 left-4 right-4 z-[200] animate-in fade-in slide-in-from-top-4 duration-500">
+      <div className="bg-[#0F111A] border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-2xl">
+        <div className="flex items-center gap-3">
+          <div className="text-white">
+            <Download size={20} strokeWidth={3} />
+          </div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-white">Instale o Luko</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => {
+              try {
+                localStorage.setItem('luko_install_dismissed', 'true');
+              } catch (e) {}
+              setShow(false);
+            }}
+            className="px-6 py-2 bg-[#cdfc54] text-[#0F111A] text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
+          >
+            Instalar
+          </button>
+          <button 
+            onClick={() => setShow(false)}
+            className="p-2 text-slate-500"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onComplete?: () => void, skipAnimation?: boolean }) => {
   const [displayedText, setDisplayedText] = useState(skipAnimation ? text : '');
   
@@ -585,13 +634,16 @@ const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onCompl
         // Support for hidden red marker
         if (isBold && part.startsWith('!!!')) {
           isNegative = true;
-          content = part.replace('!!!', '');
+          content = part.replace('!!!', '').trim();
+          if (!content.startsWith('-')) {
+            content = '-' + content;
+          }
         }
         
         return (
           <span 
             key={index} 
-            className={isBold ? (isNegative ? "text-red-500 font-bold" : "text-[#cdfc54] font-bold") : ""}
+            className={isBold ? "font-bold" : ""}
           >
             {content}
           </span>
@@ -890,7 +942,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
           O tom deve ser CÔMICO, DESCOLADO e SINCERO (estilo "Lukinho", jovem e zueiro). 
           Se o saldo for positivo, brinque que ele vai ser o novo Elon Musk. 
           Se for negativo ou perto do limite, faça uma piada ácida sobre ele ter que comer miojo ou vender a alma. 
-          Sempre destaque valores monetários com **asteriscos duplos**. Se o valor for negativo ou representar um déficit, use o prefixo !!! dentro dos asteriscos (ex: **!!!R$ 100,00**).
+          Sempre destaque valores monetários com **asteriscos duplos**. Se o valor for negativo ou representar um déficit, use o prefixo !!!- dentro dos asteriscos (ex: **!!!-R$ 100,00**).
           Máximo 15 palavras. Responda apenas a frase.`,
         });
         
@@ -1867,6 +1919,7 @@ export default function App() {
         console.log("Rendering Login Screen");
         return (
           <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
+          <InstallBanner />
           <div 
             className="max-w-sm w-full relative z-10"
           >
@@ -1902,7 +1955,7 @@ export default function App() {
 
       console.log("Rendering Main App. Tab:", activeTab);
       return (
-        <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-32">
+        <div className="min-h-screen bg-[#0F111A] text-white font-sans pb-24">
         {/* Header */}
         <header className="p-6 pt-6 max-w-md mx-auto">
           <div className="flex justify-between items-center">
@@ -2152,7 +2205,7 @@ export default function App() {
                   {billsDueThisWeek.length > 0 && (
                     <section className="animate-in fade-in duration-500 flex flex-col gap-4">
                       <div className="flex justify-between items-center">
-                        <h3 className="font-bold text-lg text-primary flex items-center gap-2">
+                        <h3 className="font-bold text-lg text-white flex items-center gap-2">
                           <Calendar size={20} className="relative -top-[1px]" />
                           Pagar
                         </h3>
@@ -2274,7 +2327,7 @@ export default function App() {
                 <select 
                   value={selectedHistoryCategory}
                   onChange={(e) => setSelectedHistoryCategory(e.target.value)}
-                  className="bg-[#1C1F2B] text-xs font-bold p-2 rounded-xl border border-slate-800 outline-none focus:ring-1 focus:ring-primary"
+                  className="bg-[#1C1F2B] text-[10px] font-black uppercase tracking-widest h-10 px-4 rounded-xl border border-slate-800 outline-none focus:ring-1 focus:ring-primary appearance-none"
                 >
                   <option value="Todas">Todas Categorias</option>
                   <option value="Futuros">Lançamentos Futuros</option>
@@ -2319,7 +2372,7 @@ export default function App() {
                       </div>
 
                       {/* Summary at the end of the list */}
-                      <div className="mt-8 pb-12">
+                      <div className="mt-8">
                         <div className="flex justify-between items-start">
                           {selectedHistoryCategory === 'Todas' ? (
                             <>
@@ -2379,7 +2432,7 @@ export default function App() {
                   />
 
                 {chatFinished && (
-                  <div className="mt-6">
+                  <div className="mt-2">
                     {(() => {
                       const currentMonthExpenses = (transactions || []).filter(t => 
                         t && t.type === 'expense' && 
@@ -2431,7 +2484,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="space-y-3 mt-6 mb-4 relative">
+                        <div className="space-y-3 mt-6 pb-12 relative">
                           {categoryData.map((item) => (
                             <div 
                               key={item.name} 
@@ -2468,7 +2521,7 @@ export default function App() {
         )}
 
           {activeTab === 'more' && (
-            <div className="space-y-4 pb-12">
+            <div className="space-y-4">
               <div className="bg-[#1C1F2B] rounded-[32px] overflow-hidden border border-slate-800/50">
                 <SettingsAccordion 
                   title="Minhas Rendas" 
@@ -2754,7 +2807,7 @@ export default function App() {
 
             </div>
 
-            <div className="px-4 pt-4">
+            <div className="px-4 pt-4 pb-8 flex flex-col items-center gap-4">
               <button 
                 onClick={handleLogout}
                 className="w-full py-4 bg-rose-500/10 text-rose-500 font-bold rounded-2xl flex items-center justify-center gap-2 border border-rose-500/20 active:scale-95 transition-transform"
@@ -2762,6 +2815,7 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.31</p>
             </div>
           </div>
         )}
@@ -2816,24 +2870,29 @@ export default function App() {
                   const cardId = formData.get('cardId') as string || undefined;
                   const dueDay = cardId ? undefined : ((finalCategory === 'Parcela' || finalCategory === 'Mensalidade' || finalCategory === 'Assinatura') ? parseInt(formData.get('dueDay') as string) || undefined : undefined);
                   
-                  await addTransaction({
-                    title: formData.get('title') as string,
-                    amount: parseCurrencyInput(formData.get('amount') as string),
-                    type: 'expense',
-                    category: finalCategory,
-                    cardId: cardId,
-                    installmentsCount: installmentsCount,
-                    dueDay: dueDay,
-                    peopleCount: peopleCount
-                  } as any);
-                  setIsModalOpen(false);
+                  try {
+                    await addTransaction({
+                      title: formData.get('title') as string,
+                      amount: parseCurrencyInput(formData.get('amount') as string),
+                      type: 'expense',
+                      category: finalCategory,
+                      cardId: cardId,
+                      installmentsCount: installmentsCount,
+                      dueDay: dueDay,
+                      peopleCount: peopleCount
+                    } as any);
+                    setIsModalOpen(false);
+                  } catch (err) {
+                    console.error('Error saving transaction:', err);
+                    alert('Erro ao salvar transação. Tente novamente.');
+                  }
                 }} className="space-y-4">
-                  <input name="title" required className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" placeholder="Título" />
+                  <input name="title" required className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none" placeholder="Título" />
                   
                   <select 
                     name="cardId" 
                     value={newTransCardId}
-                    className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
+                    className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none"
                     onChange={(e) => setNewTransCardId(e.target.value)}
                   >
                     <option value="">Saldo em conta</option>
@@ -2841,13 +2900,13 @@ export default function App() {
                   </select>
 
                   <div className="w-full">
-                    <MoneyInput name="amount" value={0} className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" placeholder="0,00" />
+                    <MoneyInput name="amount" value={0} className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none" placeholder="0,00" />
                   </div>
                   
                   <select 
                     name="category" 
                     value={newTransCategory}
-                    className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
+                    className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none"
                     onChange={(e) => setNewTransCategory(e.target.value)}
                   >
                     {Object.keys(CATEGORIES)
@@ -2859,7 +2918,7 @@ export default function App() {
                     <input 
                       name="customCategory" 
                       required 
-                      className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary" 
+                      className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none" 
                       placeholder="Nome da nova categoria" 
                     />
                   )}
@@ -2869,7 +2928,7 @@ export default function App() {
                       <select 
                         name="peopleCount" 
                         required
-                        className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none"
                       >
                         <option value="">Dividir em quantas pessoas?</option>
                         {[2, 3, 4, 5, 6, 7, 8].map(num => (
@@ -2884,7 +2943,7 @@ export default function App() {
                       <div className="w-full">
                         <select 
                           name="installmentsCount" 
-                          className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none"
                         >
                           <option value="">Nº Parcelas</option>
                           {[...Array(12)].map((_, i) => (
@@ -2897,7 +2956,7 @@ export default function App() {
                       <div className="w-full">
                         <select 
                           name="dueDay" 
-                          className="w-full bg-[#0F111A] rounded-2xl p-4 outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none"
                         >
                           <option value="">Dia Venc.</option>
                           {[...Array(31)].map((_, i) => (
@@ -2909,7 +2968,7 @@ export default function App() {
                   </div>
                   <button 
                     type="submit" 
-                    className="w-full bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20 mt-4 active:opacity-80 transition-opacity"
+                    className="w-full h-16 bg-primary text-on-primary font-bold rounded-2xl shadow-lg shadow-primary/20 mt-4 active:opacity-80 transition-opacity"
                   >
                     Salvar
                   </button>
