@@ -548,50 +548,6 @@ const NotificationItem: React.FC<{
   );
 };
 
-const InstallBanner = () => {
-  const [show, setShow] = useState(() => {
-    try {
-      return !localStorage.getItem('luko_install_dismissed');
-    } catch (e) {
-      return true;
-    }
-  });
-
-  if (!show) return null;
-
-  return (
-    <div className="fixed top-4 left-4 right-4 z-[200] animate-in fade-in slide-in-from-top-4 duration-500">
-      <div className="bg-[#0F111A] border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-2xl">
-        <div className="flex items-center gap-3">
-          <div className="text-white">
-            <Download size={20} strokeWidth={3} />
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-white">Instale o Luko</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => {
-              try {
-                localStorage.setItem('luko_install_dismissed', 'true');
-              } catch (e) {}
-              setShow(false);
-            }}
-            className="px-6 py-2 bg-[#cdfc54] text-[#0F111A] text-[10px] font-black uppercase tracking-widest rounded-xl active:scale-95 transition-transform"
-          >
-            Instalar
-          </button>
-          <button 
-            onClick={() => setShow(false)}
-            className="p-2 text-slate-500"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onComplete?: () => void, skipAnimation?: boolean }) => {
   const [displayedText, setDisplayedText] = useState(skipAnimation ? text : '');
   
@@ -682,11 +638,22 @@ const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnim
   return (
     <div className={`flex items-start gap-5 ${isLast ? '' : 'mb-6'}`}>
       <div className="flex-shrink-0 mt-1">
-        <img 
-          src={avatar} 
-          className="w-7 h-7 rounded-full object-cover" 
-          referrerPolicy="no-referrer"
-        />
+        {avatar.endsWith('.mp4') ? (
+          <video 
+            src={avatar} 
+            autoPlay 
+            loop 
+            muted 
+            playsInline 
+            className="w-7 h-7 rounded-full object-cover" 
+          />
+        ) : (
+          <img 
+            src={avatar} 
+            className="w-7 h-7 rounded-full object-cover" 
+            referrerPolicy="no-referrer"
+          />
+        )}
       </div>
       <div className="flex-1">
         {typing ? (
@@ -825,7 +792,26 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
 
   if (!show || !messages) return null;
 
-  const avatar = "https://tidas.com.br/arquivos/avatar_chat.png";
+  const totalIncome = settings.incomes.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
+  const limit = settings.monthlyLimit || totalIncome;
+  const currentMonthExpenses = transactions.filter(t => {
+    const tDate = new Date(t.date);
+    const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+    const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+    const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+    return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
+  });
+  const totalMonthlyExpenses = currentMonthExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+  const dashboardAvailable = limit - totalMonthlyExpenses;
+
+  const getLukinhoAvatar = (available: number, limit: number) => {
+    if (available < 0) return "http://tidas.com.br/arquivos/triste2.mp4";
+    if (available < (limit * 0.1)) return "http://tidas.com.br/arquivos/triste1.mp4";
+    if (available > (limit * 0.5)) return "http://tidas.com.br/arquivos/feliz2.mp4";
+    return "http://tidas.com.br/arquivos/feliz1.mp4";
+  };
+
+  const avatar = getLukinhoAvatar(dashboardAvailable, limit);
 
   return (
     <div className="pt-[65px] pb-[65px] px-2">
@@ -972,6 +958,29 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
 
   const isReady = !loading && isVideoLoaded && prediction;
 
+  const lukinhoAvatar = useMemo(() => {
+    const totalIncome = settings.incomes.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
+    const limit = settings.monthlyLimit || totalIncome;
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    const currentMonthExpenses = transactions.filter(t => {
+      const tDate = new Date(t.date);
+      const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
+      return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
+    });
+    const totalMonthlyExpenses = currentMonthExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const available = limit - totalMonthlyExpenses;
+
+    if (available < 0) return "http://tidas.com.br/arquivos/triste2.mp4";
+    if (available < (limit * 0.1)) return "http://tidas.com.br/arquivos/triste1.mp4";
+    if (available > (limit * 0.5)) return "http://tidas.com.br/arquivos/feliz2.mp4";
+    return "http://tidas.com.br/arquivos/feliz1.mp4";
+  }, [transactions, settings]);
+
   useEffect(() => {
     if (!isReady && !skipAnimation) {
       onChatComplete?.(false);
@@ -989,7 +998,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
         <div>
           <div className="overflow-hidden relative group rounded-t-[32px]">
             <video 
-              src="https://tidas.com.br/arquivos/avatar.mp4" 
+              src={lukinhoAvatar} 
               autoPlay 
               loop 
               muted={true}
@@ -1796,6 +1805,42 @@ export default function App() {
     }
   }, [transactions, settings, selectedMonth]);
 
+  // --- Negative Balance Phrases ---
+  const negativePhrase = useMemo(() => {
+    if (!stats || stats.available >= 0) return 'Disponível';
+    
+    const phrases = [
+      `Eita, {name}! O boleto venceu a gente.`,
+      `Segura a emoção, {name}! A conta tá no vermelho.`,
+      `Lukinho avisou: o Pix tá chorando hoje.`,
+      `Deu ruim, {name}! O saldo foi dar um passeio.`,
+      `Alerta de miojo! O orçamento estourou, {name}.`,
+      `Vende um rim ou fecha a carteira, {name}?`,
+      `O saldo sumiu mais rápido que o fim de semana.`,
+      `S.O.S! A conta tá pedindo socorro, {name}.`,
+      `Ih, {name}... o limite foi pro espaço!`,
+      `A conta tá mais seca que o deserto, parça.`
+    ];
+
+    try {
+      const cached = localStorage.getItem('luko_neg_phrase');
+      const cachedTime = localStorage.getItem('luko_neg_phrase_time');
+      const now = new Date().getTime();
+      const userName = user?.displayName?.split(' ')[0] || 'parça';
+
+      if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
+        return cached.replace('{name}', userName);
+      }
+
+      const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
+      localStorage.setItem('luko_neg_phrase', randomPhrase);
+      localStorage.setItem('luko_neg_phrase_time', now.toString());
+      return randomPhrase.replace('{name}', userName);
+    } catch (e) {
+      return `Eita! O boleto venceu a gente.`;
+    }
+  }, [stats, user]);
+
   const notifications = useMemo(() => {
     const list: Notification[] = [];
     const today = new Date();
@@ -1919,7 +1964,6 @@ export default function App() {
         console.log("Rendering Login Screen");
         return (
           <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center p-10 text-left relative overflow-hidden">
-          <InstallBanner />
           <div 
             className="max-w-sm w-full relative z-10"
           >
@@ -2109,11 +2153,13 @@ export default function App() {
               ) : (
                 <>
                   <div 
-                    className="bg-primary rounded-[32px] p-6 text-on-primary shadow-2xl shadow-primary/20 relative overflow-hidden"
+                    className={`${stats && stats.available < 0 ? 'bg-rose-500 shadow-rose-500/20' : 'bg-primary shadow-primary/20'} rounded-[32px] p-6 text-on-primary shadow-2xl relative overflow-hidden transition-colors duration-500`}
                   >
                     <div className="relative z-10">
                       <div className="flex justify-between items-center mb-1">
-                        <p className="text-on-primary/70 text-sm font-medium">Disponível</p>
+                        <p className="text-on-primary/70 text-sm font-medium">
+                          {negativePhrase}
+                        </p>
                       </div>
                       <h2 className="text-4xl font-black mb-6">
                         {settings.privacyMode ? '••••••' : (stats ? formatCurrency(stats.available) : '...')}
@@ -2126,7 +2172,7 @@ export default function App() {
                             className="h-full bg-[#0F111A] rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000"
                           />
                         </div>
-                        <div className="flex justify-between items-center text-[10px] text-on-primary/60 font-medium">
+                        <div className="flex justify-between items-center text-xs text-on-primary/60 font-medium">
                           <div className="flex items-center gap-1">
                             <ArrowDownLeft size={10} />
                             <span>{stats ? formatCurrency(stats.expenses) : '...'}</span>
@@ -2815,7 +2861,7 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.31</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.304</p>
             </div>
           </div>
         )}
