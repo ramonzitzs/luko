@@ -118,6 +118,8 @@ interface IncomeSource {
   id: string;
   label: string;
   value: number;
+  recurrence: 'monthly' | 'once';
+  date: string; // ISO string for 'once' incomes
 }
 
 interface UserSettings {
@@ -548,7 +550,7 @@ const NotificationItem: React.FC<{
   );
 };
 
-const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onComplete?: () => void, skipAnimation?: boolean }) => {
+const TypingText = ({ text, onComplete, skipAnimation, highlightColor = "#cdfc54" }: { text: string, onComplete?: () => void, skipAnimation?: boolean, highlightColor?: string }) => {
   const [displayedText, setDisplayedText] = useState(skipAnimation ? text : '');
   
   useEffect(() => {
@@ -596,12 +598,25 @@ const TypingText = ({ text, onComplete, skipAnimation }: { text: string, onCompl
           }
         }
         
+        // Highlight currency values in lime green
+        const currencyRegex = /(-?R\$\s?[\d.,]+)/g;
+        const subParts = content.split(currencyRegex);
+
         return (
           <span 
             key={index} 
             className={isBold ? "font-bold" : ""}
           >
-            {content}
+            {subParts.map((subPart, subIndex) => {
+              if (subPart.match(currencyRegex)) {
+                return (
+                  <span key={subIndex} style={{ color: highlightColor }}>
+                    {subPart}
+                  </span>
+                );
+              }
+              return subPart;
+            })}
           </span>
         );
       })}
@@ -816,7 +831,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
   const avatar = getLukinhoAvatar(dashboardAvailable, limit);
 
   return (
-    <div className="pt-[65px] pb-[65px] px-2">
+    <div className="pt-[65px] pb-[40px] px-2">
       <ChatMessage 
         avatar={avatar}
         delay={0}
@@ -1014,7 +1029,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
           
           <div className="bg-[#cdfc54] p-8 rounded-[32px] text-[#0f111a] shadow-[0_0_40px_rgba(205,252,84,0.35)] relative z-10 -mt-2">
             <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
-              <TypingText text={prediction} skipAnimation={skipAnimation} />
+              <TypingText text={prediction} skipAnimation={skipAnimation} highlightColor="#0f111a" />
             </p>
           </div>
 
@@ -1029,6 +1044,125 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
             />
           </div>
       )}
+    </div>
+  );
+};
+
+const LukinhoAnalise = ({ transactions, settings, userName }: { transactions: Transaction[], settings: UserSettings, userName?: string }) => {
+  const [analysis, setAnalysis] = useState<string>(() => {
+    try {
+      const cached = localStorage.getItem('luko_detailed_analysis');
+      const cachedTime = localStorage.getItem('luko_detailed_time');
+      const now = new Date().getTime();
+      if (cached && cachedTime && (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000) {
+        return cached;
+      }
+    } catch (e) {}
+    return '';
+  });
+  const [loading, setLoading] = useState(false);
+
+  const generateAnalysis = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+
+      const currentMonthExpenses = (transactions || []).filter(t => 
+        t && t.type === 'expense' && 
+        new Date(t.date).getMonth() === currentMonth &&
+        new Date(t.date).getFullYear() === currentYear
+      );
+
+      const categories: { [key: string]: number } = {};
+      currentMonthExpenses.forEach(t => {
+        categories[t.category] = (categories[t.category] || 0) + t.amount;
+      });
+
+      const total = currentMonthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+      const categoryDataStr = Object.entries(categories)
+        .map(([name, value]) => `${name}: ${formatCurrency(value)}`)
+        .join(', ');
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        setAnalysis('Lukinho precisa da chave API configurada.');
+        setLoading(false);
+        return;
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Analise estes gastos por categoria de ${userName || 'Adriano'}: ${categoryDataStr}. Total: ${formatCurrency(total)}.
+        Dê um resumo sincero e zueiro (estilo Lukinho, jovem, descolado e direto) sobre onde o dinheiro está indo.
+        Diga onde ele está gastando muito e o que pode melhorar. 
+        Use **asteriscos duplos** para valores e categorias.
+        Seja engraçado, use gírias brasileiras e seja sincero.
+        Máximo 18 palavras. Responda apenas o texto da análise.`,
+      });
+
+      const text = response.text || 'Lukinho ficou mudo com seus gastos.';
+      setAnalysis(text);
+      try {
+        localStorage.setItem('luko_detailed_analysis', text);
+        localStorage.setItem('luko_detailed_time', new Date().getTime().toString());
+      } catch (e) {}
+    } catch (error) {
+      console.error('Analysis Error:', error);
+      setAnalysis('Lukinho se perdeu nas contas. Tente de novo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!analysis && !loading) {
+      generateAnalysis();
+    }
+  }, [analysis]);
+
+  const totalIncome = settings.incomes.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
+  const limit = settings.monthlyLimit || totalIncome;
+  const currentMonthExpenses = transactions.filter(t => {
+    const now = new Date();
+    const tDate = new Date(t.date);
+    return t.type === 'expense' && tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
+  });
+  const totalMonthlyExpenses = currentMonthExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+  const dashboardAvailable = limit - totalMonthlyExpenses;
+
+  const getLukinhoAvatar = (available: number, limit: number) => {
+    if (available < 0) return "https://tidas.com.br/arquivos/triste2.mp4";
+    if (available < (limit * 0.1)) return "https://tidas.com.br/arquivos/triste1.mp4";
+    if (available > (limit * 0.5)) return "https://tidas.com.br/arquivos/feliz2.mp4";
+    return "https://tidas.com.br/arquivos/feliz1.mp4";
+  };
+
+  const avatar = getLukinhoAvatar(dashboardAvailable, limit).replace('http://', 'https://');
+
+  return (
+    <div className="mt-12 mb-12">
+      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        {loading ? (
+          <div className="mx-2 bg-[#1C1F2B] p-4 rounded-[20px] border border-slate-800/50">
+            <p className="text-sm text-slate-400 animate-pulse">Lukinho está analisando seus boletos... 💸</p>
+          </div>
+        ) : (
+          analysis && (
+            <div className="px-0">
+              <ChatMessage 
+                avatar={avatar}
+                delay={0}
+                text={analysis}
+                isLast
+              />
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 };
@@ -1603,18 +1737,57 @@ export default function App() {
   };
 
   const addIncomeSource = () => {
-    const newIncomes = [...settings.incomes, { id: Math.random().toString(36).substr(2, 9), label: 'Nova Renda', value: 0 }];
-    updateSettings({ incomes: newIncomes });
+    const totalIncomeBefore = (settings.incomes || []).reduce((acc, i) => acc + (i.value || 0), 0);
+    const newIncome: IncomeSource = { 
+      id: Math.random().toString(36).substr(2, 9), 
+      label: 'Nova Renda', 
+      value: 0,
+      recurrence: 'monthly',
+      date: new Date().toISOString()
+    };
+    const newIncomes = [...(settings.incomes || []), newIncome];
+    
+    // If monthlyLimit was equal to total income, or not set, update it to follow
+    const newTotalIncome = newIncomes.reduce((acc, i) => acc + (i.value || 0), 0);
+    const updates: Partial<UserSettings> = { incomes: newIncomes };
+    
+    if (!settings.monthlyLimit || settings.monthlyLimit === totalIncomeBefore) {
+      updates.monthlyLimit = newTotalIncome;
+    }
+    
+    updateSettings(updates);
   };
 
   const removeIncomeSource = (id: string) => {
-    const newIncomes = settings.incomes.filter(i => i.id !== id);
-    updateSettings({ incomes: newIncomes });
+    const totalIncomeBefore = (settings.incomes || []).reduce((acc, i) => acc + (i.value || 0), 0);
+    const newIncomes = (settings.incomes || []).filter(i => i.id !== id);
+    const newTotalIncome = newIncomes.reduce((acc, i) => acc + (i.value || 0), 0);
+    
+    const updates: Partial<UserSettings> = { incomes: newIncomes };
+    
+    // Only decrease if it was following or if it exceeds the new total
+    if (!settings.monthlyLimit || settings.monthlyLimit === totalIncomeBefore || settings.monthlyLimit > newTotalIncome) {
+      updates.monthlyLimit = newTotalIncome;
+    }
+    
+    updateSettings(updates);
   };
 
-  const updateIncomeSource = (id: string, label: string, value: number) => {
-    const newIncomes = settings.incomes.map(i => i.id === id ? { ...i, label, value } : i);
-    updateSettings({ incomes: newIncomes });
+  const updateIncomeSource = (id: string, label: string, value: number, recurrence: 'monthly' | 'once', date: string) => {
+    const totalIncomeBefore = (settings.incomes || []).reduce((acc, i) => acc + (i.value || 0), 0);
+    const newIncomes = (settings.incomes || []).map(i => 
+      i.id === id ? { ...i, label, value, recurrence, date } : i
+    );
+    const newTotalIncome = newIncomes.reduce((acc, i) => acc + (i.value || 0), 0);
+    
+    const updates: Partial<UserSettings> = { incomes: newIncomes };
+    
+    // If it was following or if it exceeds the new total
+    if (!settings.monthlyLimit || settings.monthlyLimit === totalIncomeBefore || settings.monthlyLimit > newTotalIncome) {
+      updates.monthlyLimit = newTotalIncome;
+    }
+    
+    updateSettings(updates);
   };
 
   const filteredTransactions = useMemo(() => {
@@ -1623,7 +1796,7 @@ export default function App() {
     const now = new Date();
     now.setHours(23, 59, 59, 999);
 
-    return transactions.filter(t => {
+    const results = (transactions || []).filter(t => {
       const tDate = new Date(t.date);
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
       
@@ -1635,14 +1808,33 @@ export default function App() {
       const isNotFuture = tDate <= now;
       
       return (isSameMonth || (isRecurring && isFutureOrCurrent)) && isNotFuture;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, selectedMonth]);
+    });
+
+    // Inject "once" incomes for the current month
+    const onceIncomes = (settings.incomes || [])
+      .filter(i => i.recurrence === 'once')
+      .filter(i => {
+        const iDate = new Date(i.date);
+        return iDate.getMonth() === currentMonth && iDate.getFullYear() === currentYear && iDate <= now;
+      })
+      .map(i => ({
+        id: `income-${i.id}`,
+        title: i.label,
+        amount: i.value,
+        type: 'income' as const,
+        category: 'Renda Extra',
+        date: new Date(i.date),
+        uid: user?.uid || ''
+      }));
+
+    return [...results, ...onceIncomes].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions, selectedMonth, settings.incomes, user]);
 
   const extratoTransactions = useMemo(() => {
     const currentMonth = selectedMonth.getMonth();
     const currentYear = selectedMonth.getFullYear();
 
-    return transactions.filter(t => {
+    const results = (transactions || []).filter(t => {
       const tDate = new Date(t.date);
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
       
@@ -1650,8 +1842,27 @@ export default function App() {
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
       return isSameMonth || (isRecurring && isFutureOrCurrent);
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, selectedMonth]);
+    });
+
+    // Inject "once" incomes for the current month
+    const onceIncomes = (settings.incomes || [])
+      .filter(i => i.recurrence === 'once')
+      .filter(i => {
+        const iDate = new Date(i.date);
+        return iDate.getMonth() === currentMonth && iDate.getFullYear() === currentYear;
+      })
+      .map(i => ({
+        id: `income-${i.id}`,
+        title: i.label,
+        amount: i.value,
+        type: 'income' as const,
+        category: 'Renda Extra',
+        date: new Date(i.date),
+        uid: user?.uid || ''
+      }));
+
+    return [...results, ...onceIncomes].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions, selectedMonth, settings.incomes, user]);
 
   const futureTransactions = useMemo(() => {
     const currentMonth = selectedMonth.getMonth();
@@ -1826,7 +2037,16 @@ export default function App() {
         })
         .reduce((acc, t) => acc + (t.amount || 0), 0);
       
-      const totalIncome = (settings.incomes || []).reduce((acc, i) => acc + (i.value || 0), 0);
+      const totalIncome = (settings.incomes || []).reduce((acc, i) => {
+        if (i.recurrence === 'once') {
+          const iDate = new Date(i.date);
+          if (iDate.getMonth() === currentMonth && iDate.getFullYear() === currentYear) {
+            return acc + (i.value || 0);
+          }
+          return acc;
+        }
+        return acc + (i.value || 0);
+      }, 0);
       
       // Default limit to total income if not set
       const limit = settings.monthlyLimit || totalIncome;
@@ -2189,11 +2409,13 @@ export default function App() {
               ) : (
                 <>
                   <div 
-                    className={`${stats && stats.available < 0 ? 'bg-rose-500 shadow-rose-500/20' : 'bg-primary shadow-primary/20'} rounded-[32px] p-6 text-on-primary shadow-2xl relative overflow-hidden transition-colors duration-500`}
+                    className={`${stats && stats.available < 0 
+                      ? 'bg-rose-500/10 border border-rose-500/30 shadow-[0_0_25px_rgba(244,63,94,0.15)]' 
+                      : 'bg-primary shadow-primary/20'} rounded-[32px] p-6 ${stats && stats.available < 0 ? 'text-rose-500' : 'text-on-primary'} shadow-2xl relative overflow-hidden transition-all duration-500`}
                   >
                     <div className="relative z-10">
                       <div className="flex justify-between items-center mb-1">
-                        <p className="text-on-primary/70 text-sm font-medium">
+                        <p className={`${stats && stats.available < 0 ? 'text-rose-500' : 'text-on-primary/70'} text-sm font-medium`}>
                           {negativePhrase}
                         </p>
                       </div>
@@ -2202,13 +2424,13 @@ export default function App() {
                       </h2>
                       
                       <div className="space-y-3">
-                        <div className="h-2.5 bg-[#0F111A]/20 rounded-full overflow-hidden">
+                        <div className={`h-2.5 ${stats && stats.available < 0 ? 'bg-rose-500/20' : 'bg-[#0F111A]/20'} rounded-full overflow-hidden`}>
                           <div 
                             style={{ width: `${Math.min(100, stats?.progress || 0)}%` }}
-                            className="h-full bg-[#0F111A] rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000"
+                            className={`h-full ${stats && stats.available < 0 ? 'bg-rose-500' : 'bg-[#0F111A]'} rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000`}
                           />
                         </div>
-                        <div className="flex justify-between items-center text-xs text-on-primary/60 font-medium">
+                        <div className={`flex justify-between items-center text-xs ${stats && stats.available < 0 ? 'text-rose-500/60' : 'text-on-primary/60'} font-medium`}>
                           <div className="flex items-center gap-1">
                             <ArrowDownLeft size={10} />
                             <span>{stats ? formatCurrency(stats.expenses) : '...'}</span>
@@ -2514,7 +2736,7 @@ export default function App() {
                   />
 
                 {chatFinished && (
-                  <div className="mt-2">
+                  <div className="mt-4">
                     {(() => {
                       const currentMonthExpenses = (transactions || []).filter(t => 
                         t && t.type === 'expense' && 
@@ -2566,7 +2788,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="space-y-3 mt-6 pb-12 relative">
+                        <div className="space-y-3 mt-8 relative">
                           {categoryData.map((item) => (
                             <div 
                               key={item.name} 
@@ -2593,6 +2815,12 @@ export default function App() {
                             </div>
                           ))}
                         </div>
+
+                        <LukinhoAnalise 
+                          transactions={transactions} 
+                          settings={settings} 
+                          userName={user?.displayName?.split(' ')[0]} 
+                        />
                       </>
                     );
                   })()}
@@ -2897,7 +3125,7 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.305</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.313</p>
             </div>
           </div>
         )}
@@ -3548,13 +3776,41 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Valor Mensal</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Valor</label>
                     <MoneyInput 
                       value={editingIncome.value}
                       onChange={(val) => setEditingIncome({ ...editingIncome, value: val })}
                       className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
                     />
                   </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Recorrência</label>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setEditingIncome({ ...editingIncome, recurrence: 'monthly' })}
+                        className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${editingIncome.recurrence === 'monthly' ? 'bg-primary text-on-primary' : 'bg-slate-800 text-slate-400'}`}
+                      >
+                        Mensal
+                      </button>
+                      <button 
+                        onClick={() => setEditingIncome({ ...editingIncome, recurrence: 'once' })}
+                        className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${editingIncome.recurrence === 'once' ? 'bg-primary text-on-primary' : 'bg-slate-800 text-slate-400'}`}
+                      >
+                        Única
+                      </button>
+                    </div>
+                  </div>
+                  {editingIncome.recurrence === 'once' && (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Data do Recebimento</label>
+                      <input 
+                        type="date" 
+                        value={editingIncome.date ? new Date(editingIncome.date).toISOString().split('T')[0] : ''}
+                        onChange={(e) => setEditingIncome({ ...editingIncome, date: new Date(e.target.value).toISOString() })}
+                        className="w-full bg-[#0F111A] border border-slate-800 rounded-2xl p-4 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-3">
                   <button 
@@ -3565,7 +3821,7 @@ export default function App() {
                   </button>
                   <button 
                     onClick={() => {
-                      updateIncomeSource(editingIncome.id, editingIncome.label, editingIncome.value);
+                      updateIncomeSource(editingIncome.id, editingIncome.label, editingIncome.value, editingIncome.recurrence, editingIncome.date);
                       setEditingIncome(null);
                     }}
                     className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl shadow-lg shadow-primary/20"
