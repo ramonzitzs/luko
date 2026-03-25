@@ -640,11 +640,13 @@ const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnim
       <div className="flex-shrink-0 mt-1">
         {avatar.endsWith('.mp4') ? (
           <video 
-            src={avatar} 
+            src={avatar.replace('http://', 'https://')} 
             autoPlay 
             loop 
             muted 
             playsInline 
+            webkit-playsinline="true"
+            preload="auto"
             className="w-7 h-7 rounded-full object-cover" 
           />
         ) : (
@@ -998,12 +1000,14 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
         <div>
           <div className="overflow-hidden relative group rounded-t-[32px]">
             <video 
-              src={lukinhoAvatar} 
+              src={lukinhoAvatar.replace('http://', 'https://')} 
               autoPlay 
               loop 
               muted={true}
               onCanPlay={(e) => e.currentTarget.muted = true}
               playsInline
+              webkit-playsinline="true"
+              preload="auto"
               className="w-full h-auto object-contain"
             />
           </div>
@@ -1060,6 +1064,9 @@ export default function App() {
   const [hasVisitedLukinho, setHasVisitedLukinho] = useState(false);
   const [isAnyModalOpen, setIsAnyModalOpen] = useState(false);
   const [pushedNotificationIds, setPushedNotificationIds] = useState<Set<string>>(new Set());
+
+  const [isSavingTransaction, setIsSavingTransaction] = useState(false);
+  const [isAutoDebit, setIsAutoDebit] = useState(false);
 
   useEffect(() => {
     console.log("Auth State Change:", { isAuthReady, user: !!user, uid: user?.uid });
@@ -1201,6 +1208,27 @@ export default function App() {
       unsubCards();
     };
   }, [user, settings.familyId]);
+  
+  // --- Auto-pay Débito em Conta ---
+  useEffect(() => {
+    if (!user || isTransactionsLoading) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const toAutoPay = transactions.filter(t => 
+      (t as any).isAutoDebit && 
+      !t.isPaid && 
+      new Date(t.date) <= today
+    );
+    
+    if (toAutoPay.length > 0) {
+      console.log(`Auto-paying ${toAutoPay.length} transactions...`);
+      toAutoPay.forEach(t => {
+        updateDoc(doc(db, 'transactions', t.id), { isPaid: true });
+      });
+    }
+  }, [transactions, user, isTransactionsLoading]);
 
   // --- Actions ---
   const handleLogin = async () => {
@@ -1222,6 +1250,7 @@ export default function App() {
   const addTransaction = async (t: Omit<Transaction, 'id' | 'uid' | 'date'>) => {
     console.log("addTransaction attempt:", t);
     if (!user) return;
+    setIsSavingTransaction(true);
     try {
       console.log('Adding transaction:', t);
       const baseDate = new Date();
@@ -1237,6 +1266,8 @@ export default function App() {
         });
         return newObj;
       };
+
+      const isAutoDebitVal = (t as any).isAutoDebit || false;
       
       if (t.category === 'Pix do Rolê') {
         const peopleCount = (t as any).peopleCount || 1;
@@ -1311,9 +1342,10 @@ export default function App() {
             familyId: settings.familyId,
             date: Timestamp.fromDate(transDate),
             isRecurring: true,
-            isPaid: false,
+            isPaid: isAutoDebitVal,
             parentTransactionId: parentId,
-            location: location
+            location: location,
+            isAutoDebit: isAutoDebitVal
           });
           await addDoc(collection(db, 'transactions'), newDoc);
         }
@@ -1329,7 +1361,7 @@ export default function App() {
           familyId: settings.familyId,
           date: Timestamp.fromDate(transDate),
           isRecurring: false,
-          isPaid: true,
+          isPaid: t.cardId ? false : true,
           location: location
         });
         await addDoc(collection(db, 'transactions'), newDoc);
@@ -1339,8 +1371,10 @@ export default function App() {
       if (t.cardId && t.type === 'expense') {
         const card = cards.find(c => c.id === t.cardId);
         if (card) {
+          // For installments, we want to discount the total amount from the limit
+          const amountToDiscount = t.amount;
           await updateDoc(doc(db, 'cards', t.cardId), {
-            currentSpend: (card.currentSpend || 0) + t.amount
+            currentSpend: (card.currentSpend || 0) + amountToDiscount
           });
         }
       }
@@ -1348,6 +1382,8 @@ export default function App() {
     } catch (err) {
       console.error('Error adding transaction:', err);
       handleFirestoreError(err, OperationType.CREATE, 'transactions');
+    } finally {
+      setIsSavingTransaction(false);
     }
   };
 
@@ -1659,7 +1695,7 @@ export default function App() {
 
     // Individual bills
     const individualBills = transactions.filter(t => {
-      if (t.type !== 'expense' || t.isPaid || t.cardId) return false;
+      if (t.type !== 'expense' || t.isPaid || t.cardId || (t as any).isAutoDebit) return false;
       const isBill = t.isRecurring || (t.installmentsCount && t.installmentsCount > 1);
       if (!isBill) return false;
 
@@ -2861,7 +2897,7 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.304</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.305</p>
             </div>
           </div>
         )}
@@ -3012,11 +3048,31 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  {newTransCategory === 'Assinatura' && !newTransCardId && (
+                    <div className="flex items-center gap-3 bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50">
+                      <div 
+                        onClick={() => setIsAutoDebit(!isAutoDebit)}
+                        className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors cursor-pointer ${isAutoDebit ? 'bg-primary border-primary' : 'border-slate-700'}`}
+                      >
+                        {isAutoDebit && <Check size={14} className="text-on-primary" />}
+                      </div>
+                      <span className="text-sm font-bold text-slate-300">Débito em conta</span>
+                      <input type="hidden" name="isAutoDebit" value={isAutoDebit ? 'true' : 'false'} />
+                    </div>
+                  )}
+
                   <button 
                     type="submit" 
-                    className="w-full h-16 bg-primary text-on-primary font-bold rounded-2xl shadow-lg shadow-primary/20 mt-4 active:opacity-80 transition-opacity"
+                    disabled={isSavingTransaction}
+                    className="w-full h-16 bg-primary text-on-primary font-bold rounded-2xl shadow-lg shadow-primary/20 mt-4 active:opacity-80 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
                   >
-                    Salvar
+                    {isSavingTransaction ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-on-primary/20 border-t-on-primary rounded-full animate-spin" />
+                        Salvando...
+                      </>
+                    ) : 'Salvar'}
                   </button>
                 </form>
               </div>
