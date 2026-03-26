@@ -243,7 +243,7 @@ const CATEGORIES: Record<string, Category> = {
   Alimentação: { name: 'Alimentação', icon: <Utensils size={18} />, color: 'bg-orange-500/10 text-orange-500' },
   Lazer: { name: 'Lazer', icon: <Coffee size={18} />, color: 'bg-purple-500/10 text-purple-500' },
   Gasolina: { name: 'Gasolina', icon: <Car size={18} />, color: 'bg-primary/10 text-primary' },
-  Mensalidade: { name: 'Mensalidade', icon: <Home size={18} />, color: 'bg-emerald-500/10 text-emerald-500' },
+  Mensalmente: { name: 'Mensalmente', icon: <Home size={18} />, color: 'bg-emerald-500/10 text-emerald-500' },
   Assinatura: { name: 'Assinatura', icon: <Play size={18} />, color: 'bg-pink-500/10 text-pink-500' },
   Parcela: { name: 'Parcela', icon: <CreditCard size={18} />, color: 'bg-primary/10 text-primary' },
   Mercado: { name: 'Mercado', icon: <ShoppingBag size={18} />, color: 'bg-blue-500/10 text-blue-500' },
@@ -735,7 +735,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
       const currentMonthExpenses = transactions.filter(t => {
         const tDate = new Date(t.date);
         const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-        const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+        const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
         const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
         return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
       });
@@ -814,7 +814,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
   const currentMonthExpenses = transactions.filter(t => {
     const tDate = new Date(t.date);
     const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-    const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+    const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
     const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
     return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
   });
@@ -873,7 +873,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
     return '';
   });
   const [loading, setLoading] = useState(!prediction);
-  const [isVideoLoaded, setIsVideoLoaded] = useState(true); // Default to true for better mobile stability
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false);
 
   useEffect(() => {
     const generatePrediction = async () => {
@@ -973,7 +973,8 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
     return () => clearTimeout(timeout);
   }, [transactions, settings.monthlyLimit, settings.incomes]);
 
-  const isReady = !loading && isVideoLoaded && prediction;
+  const isDataReady = !loading && !!prediction;
+  const isUIReady = isDataReady && isVideoLoaded;
 
   const lukinhoAvatar = useMemo(() => {
     const totalIncome = settings.incomes.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
@@ -985,7 +986,7 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
     const currentMonthExpenses = transactions.filter(t => {
       const tDate = new Date(t.date);
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
     });
@@ -999,51 +1000,68 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
   }, [transactions, settings]);
 
   useEffect(() => {
-    if (!isReady && !skipAnimation) {
+    if (isDataReady && !isVideoLoaded) {
+      const timer = setTimeout(() => {
+        setIsVideoLoaded(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isDataReady, isVideoLoaded]);
+
+  useEffect(() => {
+    if (!isUIReady && !skipAnimation) {
       onChatComplete?.(false);
     }
-  }, [isReady, skipAnimation]);
+  }, [isUIReady, skipAnimation]);
 
   return (
     <div className="min-h-[200px] flex flex-col justify-center relative">
-      {!isReady ? (
+      {!isUIReady && (
         <div className="flex flex-col items-center justify-center py-12">
           <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
           <p className="text-slate-400 text-sm font-medium animate-pulse">Carregando Lukinho sincero...</p>
         </div>
-      ) : (
-        <div>
-          <div className="overflow-hidden relative group rounded-t-[32px]">
-            <video 
-              src={lukinhoAvatar.replace('http://', 'https://')} 
-              autoPlay 
-              loop 
-              muted={true}
-              onCanPlay={(e) => e.currentTarget.muted = true}
-              playsInline
-              webkit-playsinline="true"
-              preload="auto"
-              className="w-full h-auto object-contain"
-            />
-          </div>
-          
-          <div className="bg-[#cdfc54] p-8 rounded-[32px] text-[#0f111a] shadow-[0_0_40px_rgba(205,252,84,0.35)] relative z-10 -mt-2">
-            <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
-              <TypingText text={prediction} skipAnimation={skipAnimation} highlightColor="#0f111a" />
-            </p>
-          </div>
+      )}
+      
+      <div className={isUIReady ? "opacity-100 transition-opacity duration-500" : "opacity-0 absolute pointer-events-none"}>
+        {isDataReady && (
+          <div>
+            <div className="overflow-hidden relative group rounded-t-[32px]">
+              <video 
+                src={lukinhoAvatar.replace('http://', 'https://')} 
+                autoPlay 
+                loop 
+                muted={true}
+                onCanPlay={(e) => {
+                  e.currentTarget.muted = true;
+                  setIsVideoLoaded(true);
+                }}
+                onLoadedData={() => setIsVideoLoaded(true)}
+                playsInline
+                webkit-playsinline="true"
+                preload="auto"
+                className="w-full h-auto object-contain"
+              />
+            </div>
+            
+            <div className="bg-[#cdfc54] p-8 rounded-[32px] text-[#0f111a] shadow-[0_0_40px_rgba(205,252,84,0.35)] relative z-10 -mt-2">
+              <p className="text-3xl font-[1000] leading-[1.1] tracking-tight">
+                <TypingText text={prediction} skipAnimation={skipAnimation} highlightColor="#0f111a" />
+              </p>
+            </div>
 
             <LukinhoChat 
               transactions={transactions} 
               settings={settings} 
-              isReady={isReady} 
+              isReady={isUIReady} 
               userName={userName}
               prediction={prediction}
               onComplete={onChatComplete}
               skipAnimation={skipAnimation}
             />
           </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
@@ -1143,12 +1161,46 @@ const LukinhoAnalise = ({ transactions, settings, userName }: { transactions: Tr
 
   const avatar = getLukinhoAvatar(dashboardAvailable, limit).replace('http://', 'https://');
 
+  const loadingText = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const currentMonthExpenses = (transactions || []).filter(t => 
+      t && t.type === 'expense' && 
+      new Date(t.date).getMonth() === currentMonth &&
+      new Date(t.date).getFullYear() === currentYear
+    );
+
+    if (currentMonthExpenses.length === 0) {
+      return "Lukinho está analisando seus boletos... 💸";
+    }
+
+    const randomIdx = Math.floor(Math.random() * currentMonthExpenses.length);
+    const t = currentMonthExpenses[randomIdx];
+    const amount = formatCurrency(t.amount);
+    const category = t.category;
+
+    const messages = [
+      `${category} de ${amount} é facada! Tu vive de luz? Corta essa Parcela, parça!`,
+      `Eita! ${amount} em ${category}? Lukinho está de olho nessa ostentação!`,
+      `Analisando seus gastos... ${amount} em ${category}? Tá querendo falir, é?`,
+      `Lukinho viu esse ${amount} em ${category} e quase caiu da cadeira!`,
+      `Sério mesmo? ${amount} em ${category}? Vamos ver se sobra pro miojo...`,
+      `Vixi! ${amount} em ${category}? O bolso chora e o Lukinho ri!`,
+      `Olha só... ${amount} gastos em ${category}. Alguém tá podendo, hein?`
+    ];
+
+    return messages[Math.floor(Math.random() * messages.length)];
+  }, [transactions]);
+
   return (
     <div className="mt-12 mb-12">
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {loading ? (
-          <div className="mx-2 bg-[#1C1F2B] p-4 rounded-[20px] border border-slate-800/50">
-            <p className="text-sm text-slate-400 animate-pulse">Lukinho está analisando seus boletos... 💸</p>
+          <div className="text-center py-8">
+            <p className="text-lg text-slate-400 animate-pulse font-medium px-4 leading-relaxed">
+              {loadingText}
+            </p>
           </div>
         ) : (
           analysis && (
@@ -1446,7 +1498,7 @@ export default function App() {
 
           const newDoc = cleanObject({
             ...t,
-            title: `${t.title} (${i + 1}/${t.installmentsCount})`,
+            title: t.title,
             amount: currentAmount,
             totalAmount: totalAmount,
             uid: user.uid,
@@ -1456,11 +1508,12 @@ export default function App() {
             parentTransactionId: parentId,
             installmentsCount: t.installmentsCount,
             isPaid: false,
-            location: location
+            location: location,
+            isAutoDebit: isAutoDebitVal
           });
           await addDoc(collection(db, 'transactions'), newDoc);
         }
-      } else if (t.category === 'Mensalidade' || t.category === 'Assinatura') {
+      } else if (t.category === 'Mensalmente' || t.category === 'Mensalidade' || t.category === 'Assinatura') {
         const parentId = Math.random().toString(36).substr(2, 9);
         // Create 12 months of recurring transactions as separate docs
         for (let i = 0; i < 12; i++) {
@@ -1476,7 +1529,7 @@ export default function App() {
             familyId: settings.familyId,
             date: Timestamp.fromDate(transDate),
             isRecurring: true,
-            isPaid: isAutoDebitVal,
+            isPaid: false,
             parentTransactionId: parentId,
             location: location,
             isAutoDebit: isAutoDebitVal
@@ -1495,8 +1548,9 @@ export default function App() {
           familyId: settings.familyId,
           date: Timestamp.fromDate(transDate),
           isRecurring: false,
-          isPaid: t.cardId ? false : true,
-          location: location
+          isPaid: (t.cardId || isAutoDebitVal) ? false : true,
+          location: location,
+          isAutoDebit: isAutoDebitVal
         });
         await addDoc(collection(db, 'transactions'), newDoc);
       }
@@ -1583,7 +1637,8 @@ export default function App() {
       // If it's part of a group (installments/recurring)
       if (t?.parentTransactionId) {
         const relatedTransactions = transactions.filter(item => 
-          item.parentTransactionId === t.parentTransactionId
+          item.parentTransactionId === t.parentTransactionId &&
+          new Date(item.date).getTime() >= new Date(t.date).getTime()
         );
         
         // Fields that SHOULD be updated in bulk across all related transactions
@@ -1604,11 +1659,6 @@ export default function App() {
           // For other related transactions, only apply bulk fields if any
           if (Object.keys(bulkData).length > 0) {
             const finalBulkData = { ...bulkData };
-            // Special handling for title with index
-            if (bulkData.title && related.installmentIndex && related.installmentsCount) {
-              const cleanTitle = bulkData.title.replace(/\s\(\d+\/\d+\)$/, '');
-              finalBulkData.title = `${cleanTitle} (${related.installmentIndex}/${related.installmentsCount})`;
-            }
             return updateDoc(doc(db, 'transactions', related.id), finalBulkData);
           }
           return null;
@@ -1801,7 +1851,7 @@ export default function App() {
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
       
       // Recurring/Subscription logic: show in future months
-      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
       // Filter out future transactions for "Recent Transactions" view
@@ -1838,7 +1888,7 @@ export default function App() {
       const tDate = new Date(t.date);
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
       
-      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
       return isSameMonth || (isRecurring && isFutureOrCurrent);
@@ -1873,7 +1923,7 @@ export default function App() {
     return transactions.filter(t => {
       const tDate = new Date(t.date);
       const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+      const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
       const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
       
       // "Ainda vão vencer" means the due date in the selected month is in the future (not today)
@@ -1906,7 +1956,7 @@ export default function App() {
 
     // Individual bills
     const individualBills = transactions.filter(t => {
-      if (t.type !== 'expense' || t.isPaid || t.cardId || (t as any).isAutoDebit) return false;
+      if (t.type !== 'expense' || t.isPaid || t.cardId) return false;
       const isBill = t.isRecurring || (t.installmentsCount && t.installmentsCount > 1);
       if (!isBill) return false;
 
@@ -2030,7 +2080,7 @@ export default function App() {
           const tDate = new Date(t.date);
           const isSameMonth = tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
           
-          const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Mensalidade';
+          const isRecurring = t.isRecurring || t.category === 'Assinaturas' || t.category === 'Assinatura' || t.category === 'Mensalmente' || t.category === 'Mensalidade';
           const isFutureOrCurrent = (currentYear > tDate.getFullYear()) || (currentYear === tDate.getFullYear() && currentMonth >= tDate.getMonth());
           
           return t.type === 'expense' && (isSameMonth || (isRecurring && isFutureOrCurrent));
@@ -2410,12 +2460,12 @@ export default function App() {
                 <>
                   <div 
                     className={`${stats && stats.available < 0 
-                      ? 'bg-rose-500/10 border border-rose-500/30 shadow-[0_0_25px_rgba(244,63,94,0.15)]' 
-                      : 'bg-primary shadow-primary/20'} rounded-[32px] p-6 ${stats && stats.available < 0 ? 'text-rose-500' : 'text-on-primary'} shadow-2xl relative overflow-hidden transition-all duration-500`}
+                      ? 'bg-[#ff2056] shadow-[0_0_30px_rgba(255,32,86,0.4)]' 
+                      : 'bg-primary shadow-primary/20'} rounded-[32px] p-6 ${stats && stats.available < 0 ? 'text-[#271220]' : 'text-on-primary'} shadow-2xl relative overflow-hidden transition-all duration-500`}
                   >
                     <div className="relative z-10">
                       <div className="flex justify-between items-center mb-1">
-                        <p className={`${stats && stats.available < 0 ? 'text-rose-500' : 'text-on-primary/70'} text-sm font-medium`}>
+                        <p className={`${stats && stats.available < 0 ? 'text-[#271220]' : 'text-on-primary/70'} text-sm font-medium`}>
                           {negativePhrase}
                         </p>
                       </div>
@@ -2424,13 +2474,13 @@ export default function App() {
                       </h2>
                       
                       <div className="space-y-3">
-                        <div className={`h-2.5 ${stats && stats.available < 0 ? 'bg-rose-500/20' : 'bg-[#0F111A]/20'} rounded-full overflow-hidden`}>
+                        <div className={`h-2.5 ${stats && stats.available < 0 ? 'bg-[#271220]/20' : 'bg-[#0F111A]/20'} rounded-full overflow-hidden`}>
                           <div 
                             style={{ width: `${Math.min(100, stats?.progress || 0)}%` }}
-                            className={`h-full ${stats && stats.available < 0 ? 'bg-rose-500' : 'bg-[#0F111A]'} rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000`}
+                            className={`h-full ${stats && stats.available < 0 ? 'bg-[#271220]' : 'bg-[#0F111A]'} rounded-full shadow-[0_0_10px_rgba(15,17,26,0.1)] transition-all duration-1000`}
                           />
                         </div>
-                        <div className={`flex justify-between items-center text-xs ${stats && stats.available < 0 ? 'text-rose-500/60' : 'text-on-primary/60'} font-medium`}>
+                        <div className={`flex justify-between items-center text-xs ${stats && stats.available < 0 ? 'text-[#271220]/60' : 'text-on-primary/60'} font-medium`}>
                           <div className="flex items-center gap-1">
                             <ArrowDownLeft size={10} />
                             <span>{stats ? formatCurrency(stats.expenses) : '...'}</span>
@@ -2538,12 +2588,14 @@ export default function App() {
                                 <p className={`text-sm font-black ${t.isOverdue ? 'text-rose-500' : 'text-white'}`}>
                                   {settings.privacyMode ? '••••••' : formatCurrency(t.amount)}
                                 </p>
-                                <button 
-                                  onClick={() => markAsPaid(t.id)}
-                                  className={`${t.isOverdue ? 'bg-rose-500 shadow-rose-500/20' : 'bg-primary shadow-primary/20'} text-on-primary text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg active:scale-95 transition-transform`}
-                                >
-                                  PAGAR
-                                </button>
+                                {!(t as any).isAutoDebit && (
+                                  <button 
+                                    onClick={() => markAsPaid(t.id)}
+                                    className={`${t.isOverdue ? 'bg-rose-500 shadow-rose-500/20' : 'bg-primary shadow-primary/20'} text-on-primary text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg active:scale-95 transition-transform`}
+                                  >
+                                    PAGAR
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -3125,7 +3177,7 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.313</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.315</p>
             </div>
           </div>
         )}
@@ -3178,7 +3230,7 @@ export default function App() {
                   const installmentsCount = finalCategory === 'Parcela' ? parseInt(formData.get('installmentsCount') as string) || 1 : undefined;
                   const peopleCount = finalCategory === 'Pix do Rolê' ? parseInt(formData.get('peopleCount') as string) || 1 : undefined;
                   const cardId = formData.get('cardId') as string || undefined;
-                  const dueDay = cardId ? undefined : ((finalCategory === 'Parcela' || finalCategory === 'Mensalidade' || finalCategory === 'Assinatura') ? parseInt(formData.get('dueDay') as string) || undefined : undefined);
+                  const dueDay = cardId ? undefined : ((finalCategory === 'Parcela' || finalCategory === 'Mensalmente' || finalCategory === 'Mensalidade' || finalCategory === 'Assinatura') ? parseInt(formData.get('dueDay') as string) || undefined : undefined);
                   
                   try {
                     await addTransaction({
@@ -3189,7 +3241,8 @@ export default function App() {
                       cardId: cardId,
                       installmentsCount: installmentsCount,
                       dueDay: dueDay,
-                      peopleCount: peopleCount
+                      peopleCount: peopleCount,
+                      isAutoDebit: formData.get('isAutoDebit') === 'true'
                     } as any);
                     setIsModalOpen(false);
                   } catch (err) {
@@ -3248,7 +3301,7 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className={`${(newTransCategory === 'Parcela' || newTransCategory === 'Mensalidade' || newTransCategory === 'Assinatura') && !newTransCardId ? 'grid grid-cols-2' : 'block'} gap-4`}>
+                  <div className={`${(newTransCategory === 'Parcela' || newTransCategory === 'Mensalmente' || newTransCategory === 'Mensalidade' || newTransCategory === 'Assinatura') && !newTransCardId ? 'grid grid-cols-2' : 'block'} gap-4`}>
                     {newTransCategory === 'Parcela' && (
                       <div className="w-full">
                         <select 
@@ -3256,13 +3309,13 @@ export default function App() {
                           className="w-full h-14 bg-[#0F111A] rounded-2xl px-4 outline-none focus:ring-2 focus:ring-primary appearance-none"
                         >
                           <option value="">Nº Parcelas</option>
-                          {[...Array(12)].map((_, i) => (
+                          {[...Array(48)].map((_, i) => (
                             <option key={i+1} value={i+1}>{i+1}x</option>
                           ))}
                         </select>
                       </div>
                     )}
-                    {(newTransCategory === 'Parcela' || newTransCategory === 'Mensalidade' || newTransCategory === 'Assinatura') && !newTransCardId && (
+                    {(newTransCategory === 'Parcela' || newTransCategory === 'Mensalmente' || newTransCategory === 'Mensalidade' || newTransCategory === 'Assinatura') && !newTransCardId && (
                       <div className="w-full">
                         <select 
                           name="dueDay" 
@@ -3277,7 +3330,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {newTransCategory === 'Assinatura' && !newTransCardId && (
+                  {(newTransCategory === 'Assinatura' || newTransCategory === 'Mensalmente' || newTransCategory === 'Mensalidade' || newTransCategory === 'Parcela') && !newTransCardId && (
                     <div className="flex items-center gap-3 bg-[#0F111A] p-4 rounded-2xl border border-slate-800/50">
                       <div 
                         onClick={() => setIsAutoDebit(!isAutoDebit)}
