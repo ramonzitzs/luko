@@ -1201,7 +1201,7 @@ const LukinhoAnalise = ({ transactions, settings, userName }: { transactions: Tr
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {loading ? (
           <div className="text-center py-12">
-            <p className="text-3xl text-slate-400 animate-pulse font-black px-4 leading-tight tracking-tighter">
+            <p className="text-slate-400 text-sm font-medium animate-pulse">
               {loadingText}
             </p>
           </div>
@@ -2243,8 +2243,8 @@ export default function App() {
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#cdfc54] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#0F111A] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -2266,9 +2266,9 @@ export default function App() {
     
     if (!isAuthReady) {
       return (
-        <div className="min-h-screen bg-[#0F111A] flex items-center justify-center">
+        <div className="min-h-screen bg-[#cdfc54] flex items-center justify-center">
           <div 
-            className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
+            className="w-8 h-8 border-2 border-[#0F111A] border-t-transparent rounded-full animate-spin"
           />
         </div>
       );
@@ -2284,7 +2284,7 @@ export default function App() {
           >
             <div className="mb-16">
                <img 
-                 src="https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I" 
+                 src="https://lh3.googleusercontent.com/d/1caF8UPYKEXFJ0qyEmPhO92-KTi4JnpdP" 
                  className="w-32 h-auto" 
                  referrerPolicy="no-referrer"
                  alt="Luko Logo" 

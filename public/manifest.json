@@ -2,10 +2,11 @@
   "name": "Luko",
   "short_name": "Luko",
   "description": "APP de finanças pessoais minimalista focado em simplicidade e controle de gastos.",
-  "id": "/?source=pwa",
+  "id": "/",
   "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0F111A",
+  "background_color": "#cdfc54",
   "theme_color": "#0F111A",
   "icons": [
     {
