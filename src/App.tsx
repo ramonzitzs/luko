@@ -1187,7 +1187,10 @@ const LukinhoAnalise = ({ transactions, settings, userName }: { transactions: Tr
       `Lukinho viu esse ${amount} em ${category} e quase caiu da cadeira!`,
       `Sério mesmo? ${amount} em ${category}? Vamos ver se sobra pro miojo...`,
       `Vixi! ${amount} em ${category}? O bolso chora e o Lukinho ri!`,
-      `Olha só... ${amount} gastos em ${category}. Alguém tá podendo, hein?`
+      `Olha só... ${amount} gastos em ${category}. Alguém tá podendo, hein?`,
+      `Mensalidade de ${amount} é facada! Tu vive de luz? Corta essa Parcela, parça!`,
+      `Caraca! ${amount} em ${category}? O Lukinho sincero não aguenta tanto gasto!`,
+      `Bora economizar? ${amount} em ${category} é muito dinheiro, parça!`
     ];
 
     return messages[Math.floor(Math.random() * messages.length)];
@@ -1197,8 +1200,8 @@ const LukinhoAnalise = ({ transactions, settings, userName }: { transactions: Tr
     <div className="mt-12 mb-12">
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {loading ? (
-          <div className="text-center py-8">
-            <p className="text-lg text-slate-400 animate-pulse font-medium px-4 leading-relaxed">
+          <div className="text-center py-12">
+            <p className="text-3xl text-slate-400 animate-pulse font-black px-4 leading-tight tracking-tighter">
               {loadingText}
             </p>
           </div>
@@ -1293,24 +1296,30 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log("onAuthStateChanged. User:", !!user);
       setUser(user);
-      setIsAuthReady(true);
-      if (user) {
-        setActiveTab('dashboard');
-        // Ensure user doc exists
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            incomes: [],
-            monthlyLimit: 0,
-            pushNotifications: true,
-            readNotificationIds: []
-          });
+      
+      try {
+        if (user) {
+          setActiveTab('dashboard');
+          // Ensure user doc exists
+          const userRef = doc(db, 'users', user.uid);
+          const userSnap = await getDoc(userRef);
+          if (!userSnap.exists()) {
+            await setDoc(userRef, {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+              incomes: [],
+              monthlyLimit: 0,
+              pushNotifications: true,
+              readNotificationIds: []
+            });
+          }
         }
+      } catch (error) {
+        console.error("Error in onAuthStateChanged:", error);
+      } finally {
+        setIsAuthReady(true);
       }
     });
     return () => unsubscribe();
@@ -2275,7 +2284,7 @@ export default function App() {
           >
             <div className="mb-16">
                <img 
-                 src="https://lh3.googleusercontent.com/d/1caF8UPYKEXFJ0qyEmPhO92-KTi4JnpdP" 
+                 src="https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I" 
                  className="w-32 h-auto" 
                  referrerPolicy="no-referrer"
                  alt="Luko Logo" 
