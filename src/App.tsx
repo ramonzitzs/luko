@@ -486,7 +486,7 @@ const TransactionItem: React.FC<{ t: Transaction, deleteTransaction: (id: string
             {getInteractiveIcon(t.title, t.category)}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-sm truncate pr-2">{t.title}</p>
+            <p className="font-semibold text-sm truncate pr-2">{t.title.replace(/\s*\(\d+\/\d+\)$/, '')}</p>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-slate-500 text-[10px] uppercase tracking-widest font-bold truncate">{t.category}</span>
               {t.installmentsCount && t.installmentsCount > 1 && (
@@ -805,7 +805,7 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
         setShow(true);
       }
     }
-  }, [isReady, prediction, transactions.length, settings.incomes.length, settings.monthlyLimit, skipAnimation]);
+  }, [isReady, prediction, transactions, settings.incomes, settings.monthlyLimit, skipAnimation]);
 
   if (!show || !messages) return null;
 
@@ -993,18 +993,15 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
     const totalMonthlyExpenses = currentMonthExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
     const available = limit - totalMonthlyExpenses;
 
-    if (available < 0) return "http://tidas.com.br/arquivos/triste2.mp4";
-    if (available < (limit * 0.1)) return "http://tidas.com.br/arquivos/triste1.mp4";
-    if (available > (limit * 0.5)) return "http://tidas.com.br/arquivos/feliz2.mp4";
-    return "http://tidas.com.br/arquivos/feliz1.mp4";
+    if (available < 0) return "https://tidas.com.br/arquivos/triste2.mp4";
+    if (available < (limit * 0.1)) return "https://tidas.com.br/arquivos/triste1.mp4";
+    if (available > (limit * 0.5)) return "https://tidas.com.br/arquivos/feliz2.mp4";
+    return "https://tidas.com.br/arquivos/feliz1.mp4";
   }, [transactions, settings]);
 
   useEffect(() => {
     if (isDataReady && !isVideoLoaded) {
-      const timer = setTimeout(() => {
-        setIsVideoLoaded(true);
-      }, 5000);
-      return () => clearTimeout(timer);
+      // No fallback timeout, wait for video events
     }
   }, [isDataReady, isVideoLoaded]);
 
@@ -1028,15 +1025,15 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
           <div>
             <div className="overflow-hidden relative group rounded-t-[32px]">
               <video 
-                src={lukinhoAvatar.replace('http://', 'https://')} 
+                key={lukinhoAvatar}
+                src={lukinhoAvatar} 
                 autoPlay 
                 loop 
                 muted={true}
-                onCanPlay={(e) => {
-                  e.currentTarget.muted = true;
-                  setIsVideoLoaded(true);
-                }}
+                onCanPlay={() => setIsVideoLoaded(true)}
+                onCanPlayThrough={() => setIsVideoLoaded(true)}
                 onLoadedData={() => setIsVideoLoaded(true)}
+                onLoadedMetadata={() => setIsVideoLoaded(true)}
                 playsInline
                 webkit-playsinline="true"
                 preload="auto"
@@ -1256,6 +1253,23 @@ export default function App() {
 
   const [isSavingTransaction, setIsSavingTransaction] = useState(false);
   const [isAutoDebit, setIsAutoDebit] = useState(false);
+
+  // --- Preload Lukinho Videos ---
+  useEffect(() => {
+    const videos = [
+      "https://tidas.com.br/arquivos/triste2.mp4",
+      "https://tidas.com.br/arquivos/triste1.mp4",
+      "https://tidas.com.br/arquivos/feliz2.mp4",
+      "https://tidas.com.br/arquivos/feliz1.mp4"
+    ];
+    videos.forEach(url => {
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'video';
+      link.href = url;
+      document.head.appendChild(link);
+    });
+  }, []);
 
   useEffect(() => {
     console.log("Auth State Change:", { isAuthReady, user: !!user, uid: user?.uid });
@@ -2243,7 +2257,13 @@ export default function App() {
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen bg-[#cdfc54] flex items-center justify-center">
+      <div className="min-h-screen bg-[#cdfc54] flex flex-col items-center justify-center">
+        <img 
+          src="https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I" 
+          alt="Luko" 
+          className="w-32 h-32 mb-8 animate-pulse object-contain"
+          referrerPolicy="no-referrer"
+        />
         <div className="w-8 h-8 border-2 border-[#0F111A] border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -2284,10 +2304,10 @@ export default function App() {
           >
             <div className="mb-16">
                <img 
-                 src="https://lh3.googleusercontent.com/d/1caF8UPYKEXFJ0qyEmPhO92-KTi4JnpdP" 
-                 className="w-32 h-auto" 
+                 src="https://lh3.googleusercontent.com/d/1lTDhliXO2JSyOyDP85wDBTa_RK_EcC7I" 
+                 alt="Luko" 
+                 className="w-32 h-32 object-contain"
                  referrerPolicy="no-referrer"
-                 alt="Luko Logo" 
                />
             </div>
             
@@ -2876,12 +2896,7 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-
-                        <LukinhoAnalise 
-                          transactions={transactions} 
-                          settings={settings} 
-                          userName={user?.displayName?.split(' ')[0]} 
-                        />
+                        <div className="h-[10px]" />
                       </>
                     );
                   })()}
@@ -3186,14 +3201,14 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.315</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.316</p>
             </div>
           </div>
         )}
       </main>
 
         {/* Bottom Navigation */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-4 pb-4 z-40">
+        <nav className="fixed bottom-0 left-0 right-0 bg-[#0F111A]/80 backdrop-blur-md border-t border-slate-800/50 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] z-40">
           <div className="max-w-md mx-auto flex justify-between items-center relative">
             <NavButton 
               active={activeTab === 'dashboard'} 
