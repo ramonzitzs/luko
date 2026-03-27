@@ -642,7 +642,7 @@ const ChatMessage = ({ text, delay, avatar, isLast = false, onComplete, skipAnim
       const typingTimer = setTimeout(() => {
         setTyping(false);
         setStartTyping(true);
-      }, 1200);
+      }, 600);
       return () => clearTimeout(typingTimer);
     }, delay);
     return () => clearTimeout(showTimer);
@@ -841,14 +841,14 @@ const LukinhoChat = ({ transactions, settings, isReady, userName, prediction, on
       
       <ChatMessage 
         avatar={avatar}
-        delay={4000}
+        delay={2000}
         text={messages.prediction}
         skipAnimation={skipAnimation}
       />
       
       <ChatMessage 
         avatar={avatar}
-        delay={9000}
+        delay={5000}
         isLast
         text={messages.quota}
         onComplete={() => onComplete?.(true)}
@@ -911,6 +911,11 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
           console.warn('LocalStorage not available');
         }
 
+        // Show cached prediction immediately if available, even if stale
+        if (cachedPrediction && !prediction) {
+          setPrediction(cachedPrediction);
+        }
+
         // If we have a valid cache AND the data hasn't changed, don't re-fetch
         if (
           cachedPrediction && 
@@ -918,7 +923,6 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
           cachedTime && 
           (now - parseInt(cachedTime)) < 8 * 60 * 60 * 1000
         ) {
-          setPrediction(cachedPrediction);
           setLoading(false);
           return;
         }
@@ -969,11 +973,10 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
       }
     };
 
-    const timeout = setTimeout(generatePrediction, 1000);
-    return () => clearTimeout(timeout);
+    generatePrediction();
   }, [transactions, settings.monthlyLimit, settings.incomes]);
 
-  const isDataReady = !loading && !!prediction;
+  const isDataReady = !!prediction;
   const isUIReady = isDataReady && isVideoLoaded;
 
   const lukinhoAvatar = useMemo(() => {
@@ -1001,7 +1004,10 @@ const LukinhoSincero = ({ transactions, settings, userName, onChatComplete, skip
 
   useEffect(() => {
     if (isDataReady && !isVideoLoaded) {
-      // No fallback timeout, wait for video events
+      const timer = setTimeout(() => {
+        setIsVideoLoaded(true);
+      }, 3000);
+      return () => clearTimeout(timer);
     }
   }, [isDataReady, isVideoLoaded]);
 
@@ -1253,6 +1259,28 @@ export default function App() {
 
   const [isSavingTransaction, setIsSavingTransaction] = useState(false);
   const [isAutoDebit, setIsAutoDebit] = useState(false);
+
+  const getCardCurrentSpend = (cardId: string) => {
+    const now = new Date();
+    return (transactions || [])
+      .filter(t => {
+        if (t.cardId !== cardId || t.type !== 'expense' || t.isPaid) return false;
+        
+        // Se for parcelado, conta o valor total (todas as parcelas não pagas)
+        if (t.installmentsCount && t.installmentsCount > 1) return true;
+        
+        // Se for recorrente, conta apenas se for do mês atual ou anterior
+        if (t.isRecurring) {
+          const tDate = new Date(t.date);
+          return tDate.getFullYear() < now.getFullYear() || 
+                 (tDate.getFullYear() === now.getFullYear() && tDate.getMonth() <= now.getMonth());
+        }
+        
+        // Despesa comum, sempre conta se não estiver paga
+        return true;
+      })
+      .reduce((acc, t) => acc + (t.amount || 0), 0);
+  };
 
   // --- Preload Lukinho Videos ---
   useEffect(() => {
@@ -1700,6 +1728,15 @@ export default function App() {
     console.log("deleteTransaction attempt:", id);
     if (!user) return;
     try {
+      const transaction = transactions.find(t => t.id === id);
+      if (transaction && transaction.cardId && transaction.type === 'expense' && !transaction.isPaid) {
+        const card = cards.find(c => c.id === transaction.cardId);
+        if (card) {
+          await updateDoc(doc(db, 'cards', transaction.cardId), {
+            currentSpend: Math.max(0, (card.currentSpend || 0) - (transaction.amount || 0))
+          });
+        }
+      }
       await deleteDoc(doc(db, 'transactions', id));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `transactions/${id}`);
@@ -1724,11 +1761,29 @@ export default function App() {
           new Date(t.date).getFullYear() === currentYear
         );
 
+        const totalPaid = toUpdate.reduce((acc, t) => acc + (t.amount || 0), 0);
+        const card = cards.find(c => c.id === cardId);
+
+        if (card && totalPaid > 0) {
+          await updateDoc(doc(db, 'cards', cardId), {
+            currentSpend: Math.max(0, (card.currentSpend || 0) - totalPaid)
+          });
+        }
+
         // Update them all
         await Promise.all(toUpdate.map(t => 
           updateDoc(doc(db, 'transactions', t.id), { isPaid: true })
         ));
       } else {
+        const transaction = transactions.find(t => t.id === id);
+        if (transaction && transaction.cardId && transaction.type === 'expense' && !transaction.isPaid) {
+          const card = cards.find(c => c.id === transaction.cardId);
+          if (card) {
+            await updateDoc(doc(db, 'cards', transaction.cardId), {
+              currentSpend: Math.max(0, (card.currentSpend || 0) - (transaction.amount || 0))
+            });
+          }
+        }
         await updateDoc(doc(db, 'transactions', id), { isPaid: true });
       }
     } catch (err) {
@@ -2431,7 +2486,7 @@ export default function App() {
                               <div className="text-right flex-shrink-0">
                                 <p className="text-[10px] opacity-60 uppercase tracking-widest font-black mb-0.5 leading-none">Limite</p>
                                 <p className="text-sm font-bold opacity-90 whitespace-nowrap">
-                                  {settings.privacyMode ? '••••••' : formatCurrency(card.limit - card.currentSpend)}
+                                  {settings.privacyMode ? '••••••' : formatCurrency(card.limit - getCardCurrentSpend(card.id))}
                                 </p>
                               </div>
                             </div>
@@ -2439,7 +2494,7 @@ export default function App() {
 
                           <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                             <div 
-                              style={{ width: `${Math.min(100, (card.currentSpend / card.limit) * 100)}%` }}
+                              style={{ width: `${Math.min(100, (getCardCurrentSpend(card.id) / card.limit) * 100)}%` }}
                               className="h-full bg-white rounded-full"
                             />
                           </div>
@@ -2566,14 +2621,14 @@ export default function App() {
                                     <div className="text-right flex-shrink-0">
                                       <p className="text-[10px] font-bold opacity-60 leading-none">Limite</p>
                                       <p className="text-xs font-bold opacity-90 whitespace-nowrap">
-                                        {settings.privacyMode ? '••••••' : formatCurrency(card.limit - card.currentSpend)}
+                                        {settings.privacyMode ? '••••••' : formatCurrency(card.limit - getCardCurrentSpend(card.id))}
                                       </p>
                                     </div>
                                   </div>
                                   <div className="mt-4 h-1.5 bg-white/10 rounded-full overflow-hidden">
                                     <div 
                                       className="h-full bg-white transition-all duration-500" 
-                                      style={{ width: `${Math.min(100, (card.currentSpend / card.limit) * 100)}%` }}
+                                      style={{ width: `${Math.min(100, (getCardCurrentSpend(card.id) / card.limit) * 100)}%` }}
                                     />
                                   </div>
                                 </div>
@@ -2896,7 +2951,7 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-                        <div className="h-[10px]" />
+                        <div className="h-[20px]" />
                       </>
                     );
                   })()}
@@ -3201,7 +3256,7 @@ export default function App() {
                 <LogOut size={20} />
                 Sair da conta
               </button>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.316</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mt-6">Versão 1.319</p>
             </div>
           </div>
         )}
